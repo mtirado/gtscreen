@@ -114,7 +114,7 @@ static int spr16_create_memfd(uint16_t width, uint16_t height, uint8_t bpp)
 {
 	uint32_t shmsize;
 	int memfd = -1;
-	char *mem = NULL;
+	char *addr = NULL;
 	unsigned int seals;
 	unsigned int checkseals;
 
@@ -133,8 +133,8 @@ static int spr16_create_memfd(uint16_t width, uint16_t height, uint8_t bpp)
 		printf("truncate error: %s\n", STRERR);
 		goto failure;
 	}
-	mem = mmap(0, shmsize, PROT_READ|PROT_WRITE, MAP_SHARED, memfd, 0);
-	if (mem == MAP_FAILED) {
+	addr = mmap(0, shmsize, PROT_READ|PROT_WRITE, MAP_SHARED, memfd, 0);
+	if (addr == MAP_FAILED) {
 		printf("mmap error: %s\n", STRERR);
 		goto failure;
 	}
@@ -153,14 +153,14 @@ static int spr16_create_memfd(uint16_t width, uint16_t height, uint8_t bpp)
 		goto failure;
 	}
 	g_sprite.shmem.size = shmsize;
-	g_sprite.shmem.mem  = mem;
+	g_sprite.shmem.addr = addr;
 	g_sprite.shmem.fd   = memfd;
 	return 0;
 
 failure:
 	close(memfd);
-	if (mem) {
-		if (munmap(mem, shmsize)) {
+	if (addr) {
+		if (munmap(addr, shmsize)) {
 			printf("munmap failed; %s\n", STRERR);
 		}
 	}

@@ -360,15 +360,15 @@ static int spr16_accept_connection(struct epoll_event *ev)
 
 static int spr16_server_open_memfd(struct client *cl)
 {
-	char *mem;
-	mem = mmap(0, cl->sprite.shmem.size, PROT_READ,
+	char *addr;
+	addr = mmap(0, cl->sprite.shmem.size, PROT_READ,
 			MAP_PRIVATE, cl->sprite.shmem.fd, 0);
-	if (mem == MAP_FAILED || mem == 0x0) {
+	if (addr == MAP_FAILED || addr == NULL) {
 		printf("mmap error: %s\n", strerror(errno));
 		return -1;
 	}
-	/* TODO shmem.addr instead */
-	cl->sprite.shmem.mem = mem;
+
+	cl->sprite.shmem.addr = addr;
 	return 0;
 }
 
@@ -428,8 +428,8 @@ int spr16_server_sync(int fd, struct spr16_msgdata_sync *region)
 		printf("client missing\n");
 		return -1;
 	}
-	if (!g_state.sfb || !g_state.sfb->addr || !cl->sprite.shmem.mem) {
-		printf("bad ptr %p \n", (void *)cl->sprite.shmem.mem);
+	if (!g_state.sfb || !g_state.sfb->addr || !cl->sprite.shmem.addr) {
+		printf("bad ptr %p \n", (void *)cl->sprite.shmem.addr);
 		return -1;
 	}
 
@@ -440,7 +440,7 @@ int spr16_server_sync(int fd, struct spr16_msgdata_sync *region)
 		uint32_t svoff = (((region->y + i) * g_state.sfb->width) * weight)+xoff;
 		uint32_t cloff = (((region->y + i) * cl->sprite.width) * weight)+xoff;
 		memcpy(g_state.sfb->addr + svoff,
-		       cl->sprite.shmem.mem + cloff,
+		       cl->sprite.shmem.addr + cloff,
 		       region->width * weight);
 	}
 	return 0;

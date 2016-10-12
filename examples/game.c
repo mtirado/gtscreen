@@ -18,7 +18,7 @@ unsigned int g_level;
 int draw_fillrect(struct spr16 *screen, uint16_t x, uint16_t y,
 		  uint16_t w, uint16_t h, uint32_t argb)
 {
-	uint32_t *fbmem = (uint32_t *)screen->shmem.mem;
+	uint32_t *fbmem = (uint32_t *)screen->shmem.addr;
 	int fy,fx,fh;
 	fy = screen->height - 1 - y;
 	fh = fy - h;
@@ -98,7 +98,7 @@ void set_transform(matrix3 out, float x, float y, float radians)
 int draw_bitmap(struct spr16 *screen, char *bmp,
 		uint16_t w, uint16_t h, uint32_t argb, matrix3 transform)
 {
-	uint32_t *fbmem = (uint32_t *)screen->shmem.mem;
+	uint32_t *fbmem = (uint32_t *)screen->shmem.addr;
 	struct vec2 src;
 	struct vec2 t;
 	uint32_t i = 0;

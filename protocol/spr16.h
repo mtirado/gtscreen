@@ -86,7 +86,7 @@ enum {
 
 struct spr16_shmem
 {
-	char *mem;
+	char *addr;
 	int fd;
 	uint32_t size;
 };
