@@ -1,0 +1,2 @@
+# gtscreen
+graphic type screen
