@@ -16,8 +16,8 @@
 
 #define STRERR strerror(errno)
 
-#define MSGBUFSIZE (128 - SPRITE_MAXMSGLEN)
-char g_msgbuf[MSGBUFSIZE+SPRITE_MAXMSGLEN];
+#define MAX_MSGBUF_READ (512 - SPRITE_MAXMSGLEN)
+char g_msgbuf[MAX_MSGBUF_READ+SPRITE_MAXMSGLEN];
 static void print_bytes(char *buf, const uint16_t len)
 {
 	int i;
@@ -76,30 +76,21 @@ interrupted: /* TODO err move this outside... */
 	return 0;
 }
 
-
-
-/* TODO after all that pain you better test this truncation... <-------------- XXX
- * returns updated buffer length
- * */
+/* space is reserved at end of read buffer to read a truncated message */
 static int spr16_reassemble_fragment(int fd)
 {
-	struct spr16_msghdr fraghdr;
 	char *fragpos;
 	uint32_t typelen;
 	int rdpos;
 	int bytesleft = 0;
 	int intr_count = 0;
 	int fragbytes;
-	int msgsize;
+	int msglen;
 	int r;
-
-	/* TODO tomorrow im sleepy,  header is getting chopped off somewhere
-	 * check debug output data dumpp blahdy blah blah
-	 */
 
 	/* find fragment */
 	rdpos = 0;
-	while (rdpos < MSGBUFSIZE)
+	while (rdpos < MAX_MSGBUF_READ)
 	{
 		fragpos = g_msgbuf+rdpos;
 		typelen = get_msghdr_typelen((struct spr16_msghdr *)fragpos);
@@ -107,45 +98,33 @@ static int spr16_reassemble_fragment(int fd)
 			errno = EPROTO;
 			return -1;
 		}
-		msgsize = sizeof(struct spr16_msghdr) + typelen;
-		rdpos += msgsize;
+		msglen = sizeof(struct spr16_msghdr) + typelen;
+		rdpos += msglen;
 	}
 
 	/* size of fragment we already have */
-	fragbytes = msgsize - (rdpos - MSGBUFSIZE);
-	if (fragbytes == msgsize) {
-		printf("NOT truncated\n");
-		return MSGBUFSIZE; /* not actually truncated. */
+	fragbytes = msglen - (rdpos - MAX_MSGBUF_READ);
+	if (fragbytes == msglen) {
+		return MAX_MSGBUF_READ; /* not actually truncated. */
 	}
-	else if (fragbytes < (int)sizeof(uint16_t)) {
-		/* fragment == 1 byte, this shouldn't happen.
-		 * if it does make sure read buffer + all structs divide by 2 evenly
-		 */
+	else if (fragbytes < 2) {
+		/* fragment == 1 byte, this shouldn't happen. if it does
+		 * make sure read buffer + all structs divide by 2 evenly */
 		printf("check struct alignment.\n");
 		errno = EPROTO;
 		return -1;
 	}
 
-	printf("msgpos: %d\n", (int)(fragpos));
-	printf("fragment bytes: %d\n", fragbytes);
 	/* continue with 2'nd read */
-	fraghdr.type = *(uint16_t *)(fragpos);
-	printf("fragment type: %d\n", fraghdr.type);
-	typelen = get_msghdr_typelen(&fraghdr);
-	if (typelen > SPRITE_MAXMSGLEN - sizeof(struct spr16_msghdr)) {
-		errno = EPROTO;
-		return -1;
-	}
-	bytesleft = (sizeof(struct spr16_msghdr)+typelen)-fragbytes;
+	bytesleft = msglen-fragbytes;
 	if (bytesleft <= 0 || bytesleft+fragbytes > SPRITE_MAXMSGLEN) {
 		errno = EPROTO;
 		return -1;
 	}
-	printf("fragment bytesleft: %d\n", bytesleft);
 interrupted:
-	r = read(fd, &g_msgbuf[MSGBUFSIZE], bytesleft);
+	r = read(fd, &g_msgbuf[MAX_MSGBUF_READ], bytesleft);
 	if (r == -1 && errno == EINTR) {
-		if (++intr_count < 20)
+		if (++intr_count < 100)
 			goto interrupted;
 		else
 			return -1;
@@ -154,21 +133,19 @@ interrupted:
 		errno = EPROTO;
 		return -1;
 	}
-	return MSGBUFSIZE+r;
+	return MAX_MSGBUF_READ+r;
 }
 
 char *spr16_read_msgs(int fd, uint32_t *outlen)
 {
 	int r;
 
-	r = read(fd, g_msgbuf, MSGBUFSIZE);
+	r = read(fd, g_msgbuf, MAX_MSGBUF_READ);
 	if (r == -1) {
 		return NULL;
 	}
-	if (r == MSGBUFSIZE) {
-		/* possibly truncated
-		 * TODO test this more thorougly,
-		 * it does work, just haven't tested all possible edges */
+	if (r == MAX_MSGBUF_READ) {
+		/* possibly truncated */
 		r = spr16_reassemble_fragment(fd);
 		if (r <= 0 ) {
 			return NULL;

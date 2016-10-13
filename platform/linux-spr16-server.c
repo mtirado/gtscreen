@@ -2,6 +2,8 @@
  *
  * TODO: optimize client lookup. sort by msg frequency,
  * or hashmap? that is the question. support multi client regions, mouse, etc.
+ *
+ * thorough tests would be nice too.
  */
 #define _GNU_SOURCE
 #include <errno.h>
