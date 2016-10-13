@@ -262,7 +262,6 @@ int spr16_client_sync(uint16_t x, uint16_t y, uint16_t width, uint16_t height)
 {
 	struct spr16_msghdr hdr;
 	struct spr16_msgdata_sync data;
-	/*memset(&data, 0, sizeof(data));*/
 	if (g_handshaking) {
 		return 0;
 	}

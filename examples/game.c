@@ -186,7 +186,7 @@ int game_draw()
 		return -1;
 	}
 	if (spr16_client_sync(0, 0, g_screen->width, g_screen->height )) {
-		if (errno != EAGAIN && errno != EINTR) {
+		if (errno != EAGAIN) {
 			return -1;
 		}
 	}

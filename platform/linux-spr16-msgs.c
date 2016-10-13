@@ -49,6 +49,7 @@ uint32_t get_msghdr_typelen(struct spr16_msghdr *hdr)
 	}
 }
 
+/* may return -1 with EAGAIN */
 int spr16_write_msg(int fd, struct spr16_msghdr *hdr,
 		void *msgdata, size_t msgdata_len)
 {
@@ -58,12 +59,11 @@ int spr16_write_msg(int fd, struct spr16_msghdr *hdr,
 	iov[0].iov_base = hdr;
 	iov[1].iov_len  = msgdata_len;
 	iov[1].iov_base = msgdata;
-	hdr->id = 0; /* TODO REMOVEME */
-interrupted: /* TODO err move this outside... */
-	/* TODO handle EAGAIN, these are nonblocking */
+	hdr->id = 0;
+interrupted:
 	if (writev(fd, iov, 2) == -1) {
 		if (errno == EINTR) {
-			if (++intr_count > 10) {
+			if (++intr_count > 100) {
 				errno = EAGAIN;
 				return -1;
 			}
