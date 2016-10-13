@@ -66,9 +66,9 @@ int main(int argc, char *argv[])
 		}
 		if (game_update())
 			return -1;
+		usleep(8000); /* reduce single buffer tearing */
 		if (game_draw())
 			return -1;
-		usleep(1000);
 	}
 	spr16_client_shutdown();
 
