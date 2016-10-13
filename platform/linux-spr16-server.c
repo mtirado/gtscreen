@@ -91,10 +91,6 @@ static int spr16_server_addclient(int fd)
 	cl->next   = g_clients;
 	g_clients  = cl;
 
-	/* autoswitch focus to new clients */
-	if (g_infocus == NULL)
-		g_infocus = cl;
-
 	printf("client added to server\n\n\n");
 	return 0;
 err:
@@ -498,6 +494,10 @@ int spr16_server_update(int listen_fd)
 				printf("handshake complete\n");
 				cl->connected = 1;
 				cl->handshaking = 0;
+				/* switch focus to new client */
+				if (g_infocus == NULL)
+					g_infocus = cl;
+
 				continue;
 			}
 			/* read and dispatch */
