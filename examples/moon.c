@@ -28,7 +28,7 @@ struct moon *moon_create(float mass, uint16_t fuel, uint32_t color)
 		goto err;
 	/* yeah that's ugly, macros could help */
 	newmoon->player->o.dyn->center.x = 200.0f;
-	newmoon->player->o.dyn->center.y = 500.0f;
+	newmoon->player->o.dyn->center.y = 200.0f;
 	newmoon->player->o.dyn->mass = 300;
 	newmoon->player->o.dyn->radius = 5.0f;
 	newmoon->dyn_objs.newtons.x = 0;

@@ -3,7 +3,6 @@
  * common functions used by client and server
  *
  *
- *  TODO  sockets are nonblocking, should probably check for EAGAIN.
  */
 #include <errno.h>
 #include <string.h>

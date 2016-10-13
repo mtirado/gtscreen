@@ -69,7 +69,9 @@ int exec_loop(int tty)
 {
 	int listen_socket;
 
-	listen_socket = spr16_server_init();
+	listen_socket = spr16_server_init(g_state.sfb->width,
+					  g_state.sfb->height,
+					  g_state.sfb->bpp);
 	if (listen_socket == -1 ){
 		printf("server init failed\n");
 		return -1;

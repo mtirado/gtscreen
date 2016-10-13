@@ -23,6 +23,8 @@
  * for multiple regions, right now it's just one big chunk of shmem.
  */
 input_handler g_input_func;
+servinfo_handler g_servinfo_func;
+
 struct spr16 g_sprite;
 struct spr16_msgdata_servinfo g_servinfo;
 struct epoll_event g_events[MAX_EPOLL];
@@ -40,6 +42,19 @@ struct spr16 *spr16_client_get_sprite()
 	return &g_sprite;
 }
 
+int spr16_client_init()
+{
+	g_input_func = NULL;
+	g_servinfo_func = NULL;
+	g_epoll_fd = -1;
+	g_socket = -1;
+	g_handshaking = 1;
+	memset(&g_servinfo, 0, sizeof(g_servinfo));
+	memset(&g_sprite, 0, sizeof(g_sprite));
+
+	return 0;
+}
+
 /*
  * name is the vt we are on. e.g. tty1
  * returns connected socket
@@ -47,15 +62,8 @@ struct spr16 *spr16_client_get_sprite()
 int spr16_client_connect(char *name)
 {
 	struct sockaddr_un addr;
-	/* TODO move this stuff into an init function ?? */
-	g_input_func = NULL;
-	memset(&addr, 0, sizeof(addr));
-	g_epoll_fd = -1;
-	g_socket = -1;
-	g_handshaking = 1;
-	memset(&g_servinfo, 0, sizeof(g_servinfo));
-	memset(&g_sprite, 0, sizeof(g_sprite));
 
+	memset(&addr, 0, sizeof(addr));
 	addr.sun_family = AF_UNIX;
 	snprintf(addr.sun_path, sizeof(addr.sun_path), "%s/%s", SPRITE_SOCKPATH, name);
 	/* TODO check perms, sticky bit on dir, etc */
@@ -175,9 +183,9 @@ int spr16_client_handshake_start(char *name, uint16_t width, uint16_t height)
 	memset(&hdr, 0, sizeof(hdr));
 	memset(&data, 0, sizeof(data));
 
-	if (width > g_servinfo.maxwidth || height > g_servinfo.maxheight) {
+	if (width > g_servinfo.width || height > g_servinfo.height) {
 		printf("sprite size(%d, %d) -- server max(%d, %d)\n",
-				width,height,g_servinfo.maxwidth,g_servinfo.maxheight);
+				width,height,g_servinfo.width,g_servinfo.height);
 		return -1;
 	}
 	hdr.type = SPRITEMSG_REGISTER_SPRITE;
@@ -199,21 +207,15 @@ int spr16_client_handshake_start(char *name, uint16_t width, uint16_t height)
 int spr16_client_servinfo(struct spr16_msgdata_servinfo *sinfo)
 {
 	/* this info is static, msg is expected only once */
-	if (g_servinfo.maxbpp)
+	if (g_servinfo.bpp)
 		return -1;
-	if (!sinfo->maxbpp || !sinfo->maxwidth || !sinfo->maxheight)
+	if (!sinfo->bpp || !sinfo->width || !sinfo->height)
 		return -1;
-	printf("client: read msg\n");
-	printf("max width: %d\n", sinfo->maxwidth);
-	printf("max width: %d\n", sinfo->maxheight);
-	printf("max bpp: %d\n",   sinfo->maxbpp);
+
 	memcpy(&g_servinfo, sinfo, sizeof(g_servinfo));
-
-	/* TODO uhhh fix this. add handler for servinfo i guess? */
-	if (spr16_client_handshake_start("TEST", 800, 600))
-		return -1;
-
-	return 0;
+	if (!g_servinfo_func)
+		return 0;
+	return g_servinfo_func(&g_servinfo);
 }
 
 /* ack / nack */
@@ -348,12 +350,6 @@ int spr16_client_shutdown()
 	return 0;
 }
 
-/* TODO, either unify all input messages, or split up into multiple handlers */
-int spr16_client_set_input_handler(input_handler func)
-{
-	g_input_func = func;
-	return 0;
-}
 int spr16_client_input_keyboard(struct spr16_msgdata_input_keyboard *ki)
 {
 	if (!g_input_func)
@@ -361,7 +357,18 @@ int spr16_client_input_keyboard(struct spr16_msgdata_input_keyboard *ki)
 	return g_input_func(ki->flags, ki->keycode);
 }
 
+/* TODO, either unify all input messages, or split up into multiple handlers */
+int spr16_client_set_input_handler(input_handler func)
+{
+	g_input_func = func;
+	return 0;
+}
 
+int spr16_client_set_servinfo_handler(servinfo_handler func)
+{
+	g_servinfo_func = func;
+	return 0;
+}
 
 
 

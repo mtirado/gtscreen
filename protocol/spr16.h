@@ -38,9 +38,6 @@
 
 #define SPRITE_MAXMSGLEN 64 /* hdr+data */
 #define SPRITE_MAXNAME   32
-#define SPRITE_MAXWIDTH  4096
-#define SPRITE_MAXHEIGHT 4096
-#define SPRITE_MAXBPP    32
 #define SPRITE_SOCKPATH "/tmp/spr16"
 #define SPRITE_ACK 1
 #define SPRITE_NACK 0
@@ -122,9 +119,9 @@ struct spr16_msghdr
 
 struct spr16_msgdata_servinfo
 {
-	uint16_t maxwidth;
-	uint16_t maxheight;
-	uint16_t maxbpp;
+	uint16_t width;
+	uint16_t height;
+	uint16_t bpp;
 };
 
 /* this message is immediately followed by 1 byte SCM_RIGHTS message
@@ -163,6 +160,7 @@ struct spr16_msgdata_input_keyboard
 };
 
 typedef int (*input_handler)(uint16_t flags, uint16_t keycode);
+typedef int (*servinfo_handler)(struct spr16_msgdata_servinfo *sinfo);
 
 /*----------------------------------------------*
  * message handling                             *
@@ -179,7 +177,9 @@ int afunix_recv_fd(int sock, int *fd_out);
 /*----------------------------------------------*
  * client side                                  *
  *----------------------------------------------*/
+int spr16_client_init();
 int spr16_client_connect(char *name);
+int spr16_client_handshake_start(char *name, uint16_t width, uint16_t height);
 int spr16_client_handshake_wait(uint32_t timeout);
 int spr16_client_servinfo(struct spr16_msgdata_servinfo *sinfo);
 /* TODO pixel formats */
@@ -193,11 +193,13 @@ struct spr16 *spr16_client_get_sprite();
 int spr16_client_sync(uint16_t x, uint16_t y, uint16_t width, uint16_t height);
 int spr16_client_input_keyboard(struct spr16_msgdata_input_keyboard *ki);
 int spr16_client_set_input_handler(input_handler func);
+int spr16_client_set_servinfo_handler(servinfo_handler func);
+
 
 /*----------------------------------------------*
  * server side                                  *
  *----------------------------------------------*/
-int spr16_server_init();
+int spr16_server_init(uint16_t width, uint16_t height, uint16_t bpp);
 int spr16_server_servinfo(int fd);
 int spr16_server_sync(int fd, struct spr16_msgdata_sync *region);
 int spr16_server_register_sprite(int fd, struct spr16_msgdata_register_sprite *reg);

@@ -44,6 +44,9 @@ struct client *g_clients;
 int g_epoll_fd;
 int g_keyboard_fd;
 
+uint16_t g_width;
+uint16_t g_height;
+uint16_t g_bpp;
 
 static struct client *spr16_server_getclient(int fd)
 {
@@ -149,16 +152,14 @@ int spr16_server_servinfo(int fd)
 	memset(&hdr, 0, sizeof(hdr));
 	memset(&data, 0, sizeof(data));
 
-	hdr.type       = SPRITEMSG_SERVINFO;
-	data.maxwidth  = SPRITE_MAXWIDTH;
-	data.maxheight = SPRITE_MAXHEIGHT;
-	data.maxbpp    = SPRITE_MAXBPP;
+	hdr.type    = SPRITEMSG_SERVINFO;
+	data.width  = g_width;
+	data.height = g_height;
+	data.bpp    = g_bpp;
 	if (spr16_write_msg(fd, &hdr, &data, sizeof(data))) {
 		printf("spr16_servinfo write_msg: %s\n", STRERR);
 		return -1;
 	}
-
-	printf("server: wrote srvinfo msg\n");
 	return 0;
 }
 
@@ -175,15 +176,15 @@ int spr16_server_register_sprite(int fd, struct spr16_msgdata_register_sprite *r
 		return -1;
 	}
 	/* TODO send nacks */
-	if (reg->width > SPRITE_MAXWIDTH || !reg->width) {
+	if (reg->width > g_width || !reg->width) {
 		printf("bad width\n");
 		return -1;
 	}
-	if (reg->height > SPRITE_MAXHEIGHT || !reg->height) {
+	if (reg->height > g_height || !reg->height) {
 		printf("bad height\n");
 		return -1;
 	}
-	if (reg->bpp > SPRITE_MAXBPP || reg->bpp < 8) {
+	if (reg->bpp > g_bpp || reg->bpp < 8) {
 		printf("bad bpp\n");
 		return -1;
 	}
@@ -251,12 +252,15 @@ static int server_create_socket()
 	return sock;
 }
 
-int spr16_server_init()
+int spr16_server_init(uint16_t width, uint16_t height, uint16_t bpp)
 {
 	g_clients = NULL;
 	g_infocus = NULL;
 	g_epoll_fd = -1;
 	g_keyboard_fd = -1;
+	g_width = width;
+	g_height = height;
+	g_bpp = bpp;
 	return server_create_socket();
 }
 
@@ -412,8 +416,8 @@ int spr16_server_sync(int fd, struct spr16_msgdata_sync *region)
 	 * TODO some way to handle multiple displays, for now consider
 	 * out of bounds syncs to be errors
 	 */
-	if (region->x + region->width > g_state.sfb->width
-			|| region->y + region->height > g_state.sfb->height) {
+	if (region->x + region->width > g_width
+			|| region->y + region->height > g_height) {
 		printf("bad sync parameters\n");
 		return -1;
 	}
@@ -435,7 +439,7 @@ int spr16_server_sync(int fd, struct spr16_msgdata_sync *region)
 	for (i = 0; i < region->height; ++i)
 	{
 		uint32_t xoff  = region->x * weight;
-		uint32_t svoff = (((region->y + i) * g_state.sfb->width) * weight)+xoff;
+		uint32_t svoff = (((region->y + i) * g_width) * weight)+xoff;
 		uint32_t cloff = (((region->y + i) * cl->sprite.width) * weight)+xoff;
 		memcpy(g_state.sfb->addr + svoff,
 		       cl->sprite.shmem.addr + cloff,
