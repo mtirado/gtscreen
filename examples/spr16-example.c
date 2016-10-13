@@ -13,20 +13,26 @@
 #define STRERR strerror(errno)
 
 
-int main()
+int main(int argc, char *argv[])
 {
 	struct spr16 *screen;
 	int r;
 
+	if (argc < 2) {
+		printf("usage: program <server-name>\n");
+		printf("e.g: spr16_example tty1\n");
+		return -1;
+	}
 	/* line buffer output */
 	setvbuf(stdout, NULL, _IOLBF, 0);
 	setvbuf(stderr, NULL, _IOLBF, 0);
 
-	r = spr16_client_connect("tty1");
+	r = spr16_client_connect(argv[1]);
 	if (r == -1) {
-		printf("connect error\n");
+		printf("connect(%s) error:\n", argv[1]);
 		return -1;
 	}
+
 	spr16_client_set_input_handler(game_input);
 	if (spr16_client_handshake_wait(10000)) {
 		printf("handshake timed out\n");
