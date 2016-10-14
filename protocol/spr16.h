@@ -201,7 +201,7 @@ int spr16_client_set_servinfo_handler(servinfo_handler func);
  *----------------------------------------------*/
 int spr16_server_init(uint16_t width, uint16_t height, uint16_t bpp);
 int spr16_server_servinfo(int fd);
-int spr16_server_sync(int fd, struct spr16_msgdata_sync *region);
+int spr16_server_sync(struct spr16_msgdata_sync *region);
 int spr16_server_register_sprite(int fd, struct spr16_msgdata_register_sprite *reg);
 int spr16_server_update();
 int spr16_open_memfd(struct spr16_msgdata_register_sprite *reg);

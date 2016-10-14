@@ -40,6 +40,7 @@ struct client
 
 struct client *g_infocus;
 struct client *g_clients;
+struct client *g_dispatch_client; /* set to null, unless dispatching msgs */
 
 int g_epoll_fd;
 int g_keyboard_fd;
@@ -255,6 +256,7 @@ static int server_create_socket()
 int spr16_server_init(uint16_t width, uint16_t height, uint16_t bpp)
 {
 	g_clients = NULL;
+	g_dispatch_client = NULL;
 	g_infocus = NULL;
 	g_epoll_fd = -1;
 	g_keyboard_fd = -1;
@@ -405,7 +407,7 @@ int spr16_server_handshake(struct client *cl)
 /* TODO decouple linux-DRM and spr16
  * this is a big ugly hack right now
  * */
-int spr16_server_sync(int fd, struct spr16_msgdata_sync *region)
+int spr16_server_sync(struct spr16_msgdata_sync *region)
 {
 	const uint16_t bpp = 32;
 	const uint32_t weight = bpp/8;
@@ -421,13 +423,9 @@ int spr16_server_sync(int fd, struct spr16_msgdata_sync *region)
 		printf("bad sync parameters\n");
 		return -1;
 	}
-	/* TODO alternating buffering for vsync */
-	/* ALSO this is horrendously looking up client twice,
-	 * add client param to dispatch msgs??
-	 */
-	cl = spr16_server_getclient(fd);
+
+	cl = g_dispatch_client;
 	if (cl == NULL) {
-		printf("client missing\n");
 		return -1;
 	}
 	if (!g_state.sfb || !g_state.sfb->addr || !cl->sprite.shmem.addr) {
@@ -511,11 +509,14 @@ int spr16_server_update(int listen_fd)
 				spr16_server_removeclient(evfd);
 				continue;
 			}
+			g_dispatch_client = cl;
 			if (spr16_dispatch_msgs(evfd, msgbuf, msglen)) {
+				g_dispatch_client = NULL;
 				printf("dispatch_msgs: %s\n", STRERR);
 				spr16_server_removeclient(evfd);
 				continue;
 			}
+			g_dispatch_client = NULL;
 		}
 	}
 

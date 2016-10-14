@@ -211,8 +211,7 @@ int spr16_dispatch_msgs(int fd, char *msgbuf, uint32_t buflen)
 			}
 			break;
 		case SPRITEMSG_SYNC:
-			if (spr16_server_sync(fd,
-					(struct spr16_msgdata_sync *)msgdata)) {
+			if (spr16_server_sync((struct spr16_msgdata_sync *)msgdata)) {
 				printf("sync failed\n");
 				return -1;
 			}
