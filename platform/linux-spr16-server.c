@@ -203,6 +203,25 @@ int spr16_server_register_sprite(int fd, struct spr16_msgdata_register_sprite *r
 
 /* TODO server_disconnect -- free sprites */
 
+static int open_log(char *socketname)
+{
+	char path[MAX_SYSTEMPATH];
+	int fd;
+	setvbuf(stdout, NULL, _IOLBF, 0);
+	setvbuf(stderr, NULL, _IOLBF, 0);
+	snprintf(path, sizeof(path), "%s/%s", SPRITE_LOGPATH, socketname);
+	fd = open(path, O_WRONLY|O_CLOEXEC|O_CREAT|O_TRUNC, 0755);
+	if (fd == -1) {
+		printf("open log: %s\n", STRERR);
+		return -1;
+	}
+	if (dup2(fd, STDOUT_FILENO) != STDOUT_FILENO
+			|| dup2(fd, STDERR_FILENO) != STDERR_FILENO) {
+		printf("dup2: %s\n", STRERR);
+		return -1;
+	}
+	return 0;
+}
 
 static int server_create_socket()
 {
@@ -210,6 +229,9 @@ static int server_create_socket()
 	struct epoll_event ev;
 	struct sockaddr_un addr;
 	memset(&addr, 0, sizeof(addr));
+
+	if (open_log("tty1"))
+		return 0;
 
 	addr.sun_family = AF_UNIX;
 	/* TODO detect current vt*/

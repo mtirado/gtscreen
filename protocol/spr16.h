@@ -39,6 +39,7 @@
 #define SPRITE_MAXMSGLEN 64 /* hdr+data */
 #define SPRITE_MAXNAME   32
 #define SPRITE_SOCKPATH "/tmp/spr16"
+#define SPRITE_LOGPATH "/usr/var/log/spr16"
 #define SPRITE_ACK 1
 #define SPRITE_NACK 0
 
