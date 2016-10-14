@@ -38,7 +38,7 @@ struct client
 	int socket;
 };
 
-struct client *g_infocus;
+struct client *g_focused_client;
 struct client *g_clients;
 struct client *g_dispatch_client; /* set to null, unless dispatching msgs */
 
@@ -127,8 +127,8 @@ static int spr16_server_removeclient(int fd)
 	else
 		prev->next = cl->next;
 
-	if (g_infocus == cl)
-		g_infocus = NULL;
+	if (g_focused_client == cl)
+		g_focused_client = NULL;
 
 	/* TODO free sprites, TODO unmap memory */
 	if (epoll_ctl(g_epoll_fd, EPOLL_CTL_DEL, fd, NULL)) {
@@ -279,7 +279,7 @@ int spr16_server_init(uint16_t width, uint16_t height, uint16_t bpp)
 {
 	g_clients = NULL;
 	g_dispatch_client = NULL;
-	g_infocus = NULL;
+	g_focused_client = NULL;
 	g_epoll_fd = -1;
 	g_keyboard_fd = -1;
 	g_width = width;
@@ -335,7 +335,7 @@ interrupted:
 		printf("read input: %s\n", STRERR);
 		return -1;
 	}
-	if (g_infocus) {
+	if (g_focused_client) {
 		/* 1 char == 1 keycode */
 		for (i = 0; i < r; ++i)
 		{
@@ -345,13 +345,16 @@ interrupted:
 			hdr.type = SPRITEMSG_INPUT_KEYBOARD;
 			data.flags = 0;
 			data.keycode = buf[i];
-			if (spr16_write_msg(g_infocus->socket,
+			if (spr16_write_msg(g_focused_client->socket,
 						&hdr, &data, sizeof(data))) {
-				spr16_server_removeclient(g_infocus->socket);
-				g_infocus = NULL;
+				spr16_server_removeclient(g_focused_client->socket);
+				g_focused_client = NULL;
 				return 0;
 			}
 		}
+	}
+	else {
+		g_focused_client = g_clients;
 	}
 	return 0;
 }
@@ -519,8 +522,8 @@ int spr16_server_update(int listen_fd)
 				cl->connected = 1;
 				cl->handshaking = 0;
 				/* switch focus to new client */
-				if (g_infocus == NULL)
-					g_infocus = cl;
+				if (g_focused_client == NULL)
+					g_focused_client = cl;
 
 				continue;
 			}
@@ -554,8 +557,7 @@ int spr16_server_shutdown(int listen_fd)
 	close(g_epoll_fd);
 	g_epoll_fd = -1;
 	g_clients = NULL;
-	g_infocus = NULL;
-	return -1;
+	g_focused_client = NULL;
+	return 0;
 }
-
 
