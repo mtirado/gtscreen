@@ -239,18 +239,37 @@ static int handle_ack(struct spr16_msgdata_ack *ack)
 		g_handshaking = 0;
 		break;
 	default:
+		printf("unknown ack\n");
 		return -1;
 	}
 	return 0;
 }
 static int handle_nack(struct spr16_msgdata_ack *nack)
 {
-	/* TODO */
 	switch (nack->info)
 	{
+	case SPRITENACK_DISCONNECT:
+		printf("nack: disconnected\n");
+		errno = ECONNRESET;
+		return -1;
+	case SPRITENACK_SHMEM:
+		printf("nack: shared memory erro\n");
+		break;
+	case SPRITENACK_WIDTH:
+		printf("nack: bad width\n");
+		break;
+	case SPRITENACK_HEIGHT:
+		printf("nack: bad height\n");
+		break;
+	case SPRITENACK_BPP:
+		printf("nack: bad bpp\n");
+		break;
 	default:
+		printf("unhandled nack: %d\n", nack->info);
+		errno = EPROTO;
 		return -1;
 	}
+	return 0;
 }
 int spr16_client_ack(struct spr16_msgdata_ack *ack)
 {

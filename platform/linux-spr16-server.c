@@ -140,6 +140,7 @@ static int spr16_server_removeclient(int fd)
 
 
 	/* TODO send disconnect ack */
+	spr16_send_ack(fd, SPRITE_NACK, SPRITENACK_DISCONNECT);
 	free(cl);
 	close(fd);
 	printf("client removed\n");
@@ -179,14 +180,17 @@ int spr16_server_register_sprite(int fd, struct spr16_msgdata_register_sprite *r
 	/* TODO send nacks */
 	if (reg->width > g_width || !reg->width) {
 		printf("bad width\n");
+		spr16_send_ack(fd, SPRITE_NACK, SPRITENACK_WIDTH);
 		return -1;
 	}
 	if (reg->height > g_height || !reg->height) {
 		printf("bad height\n");
+		spr16_send_ack(fd, SPRITE_NACK, SPRITENACK_HEIGHT);
 		return -1;
 	}
 	if (reg->bpp > g_bpp || reg->bpp < 8) {
 		printf("bad bpp\n");
+		spr16_send_ack(fd, SPRITE_NACK, SPRITENACK_BPP);
 		return -1;
 	}
 	cl->handshaking = 1;
@@ -411,6 +415,7 @@ int spr16_server_handshake(struct client *cl)
 	}
 	cl->sprite.shmem.fd = fd;
 	if (spr16_server_open_memfd(cl)) {
+		spr16_send_ack(fd, SPRITE_NACK, SPRITENACK_SHMEM);
 		return -1;
 	}
 	if (spr16_send_ack(cl->socket, SPRITE_ACK, SPRITEACK_ESTABLISHED)) {

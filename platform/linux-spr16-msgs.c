@@ -159,7 +159,7 @@ char *spr16_read_msgs(int fd, uint32_t *outlen)
 	return g_msgbuf;
 }
 
-int spr16_send_ack(int fd, uint8_t ack, uint32_t ackinfo)
+int spr16_send_ack(int fd, uint16_t ack, uint16_t ackinfo)
 {
 	struct spr16_msghdr hdr;
 	struct spr16_msgdata_ack data;
@@ -182,7 +182,7 @@ int spr16_dispatch_msgs(int fd, char *msgbuf, uint32_t buflen)
 	char *msgpos, *msgdata;
 	int rdpos;
 	uint32_t typelen;
-
+	errno = 0;
 	rdpos = 0;
 	while (rdpos+sizeof(struct spr16_msghdr) < buflen)
 	{

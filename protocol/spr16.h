@@ -40,7 +40,7 @@
 #define SPRITE_MAXNAME   32
 #define SPRITE_SOCKPATH "/tmp/spr16"
 #define SPRITE_LOGPATH "/usr/var/log/spr16"
-#define SPRITE_ACK 1
+#define SPRITE_ACK  1
 #define SPRITE_NACK 0
 
 /* TODO set sticky bit and check that, + perms like xephyr does ;)
@@ -52,12 +52,11 @@
 enum {
 	SPRITEACK_SEND_DESCRIPTOR=1,
 	SPRITEACK_ESTABLISHED,
-	SPRITENACK_SIZE,
+	SPRITENACK_SIZE, /* size might need to be padded beyond w*h*bpp */
 	SPRITENACK_WIDTH,
 	SPRITENACK_HEIGHT,
 	SPRITENACK_BPP,
-	SPRITENACK_DEPTH,
-	SPRITENACK_NOMEM,
+	SPRITENACK_SHMEM,
 	SPRITENACK_DISCONNECT
 };
 
@@ -170,7 +169,7 @@ char *spr16_read_msgs(int fd, uint32_t *outlen);
 int spr16_dispatch_msgs(int fd, char *msgbuf, uint32_t buflen);
 int spr16_write_msg(int fd, struct spr16_msghdr *hdr,
                     void *msgdata, size_t msgdata_len);
-int spr16_send_ack(int fd, uint8_t ack, uint32_t ackinfo);
+int spr16_send_ack(int fd, uint16_t ack, uint16_t ackinfo);
 int afunix_send_fd(int sock, int fd);
 int afunix_recv_fd(int sock, int *fd_out);
 
