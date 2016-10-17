@@ -84,9 +84,11 @@ int exec_loop(int tty)
 	{
 		if (spr16_server_update(listen_socket)) {
 			printf("spr16 update error\n");
+			spr16_server_shutdown(listen_socket);
 			return -1;
 		}
 	}
+	spr16_server_shutdown(listen_socket);
 	return 0;
 }
 
@@ -175,7 +177,9 @@ int main()
 		return -1;
 	}
 	sig_setup();
+
 	ret = exec_loop(tty);
+
 	destroy_sfb(card_fd, sfb);
 free_ret:
 	/* TODO general cleanup function that loops through resources on a card */

@@ -206,6 +206,7 @@ int spr16_server_register_sprite(int fd, struct spr16_msgdata_register_sprite *r
 int spr16_server_update();
 int spr16_open_memfd(struct spr16_msgdata_register_sprite *reg);
 int spr16_server_init_input(int fd);
+int spr16_server_shutdown(int listen_fd);
 
 /*
  * int spr16_register_sprite(uint32_t id);

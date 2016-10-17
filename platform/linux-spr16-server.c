@@ -213,8 +213,6 @@ int spr16_server_register_sprite(int fd, struct spr16_msgdata_register_sprite *r
 	return 0;
 }
 
-/* TODO server_disconnect -- free sprites */
-
 static int open_log(char *socketname)
 {
 	char path[MAX_SYSTEMPATH];
@@ -562,11 +560,16 @@ int spr16_server_update(int listen_fd)
 	return 0;
 }
 
-/* TODO send nacks */
 int spr16_server_shutdown(int listen_fd)
 {
-	printf("server failure\n");
-	/* TODO free lists */
+	printf("--- server shutdown ---\n");
+	while (g_clients)
+	{
+		struct client *tmp = g_clients->next;
+		spr16_send_ack(g_clients->socket, SPRITE_NACK, SPRITENACK_DISCONNECT);
+		spr16_server_freeclient(g_clients);
+		g_clients = tmp;
+	}
 	close(listen_fd);
 	close(g_epoll_fd);
 	g_epoll_fd = -1;
