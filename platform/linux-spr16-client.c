@@ -299,10 +299,6 @@ int spr16_client_sync(uint16_t x, uint16_t y, uint16_t width, uint16_t height)
 	return 0;
 }
 
-/* TODO
- * does client need hooks for received message notifications?
- * ^ ^ yes ^ ^
- */
 int spr16_client_update()
 {
 	int i;
