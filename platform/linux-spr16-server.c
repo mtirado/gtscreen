@@ -103,6 +103,18 @@ err:
 
 }
 
+static int spr16_server_freeclient(struct client *c)
+{
+	close(c->sprite.shmem.fd);
+	if (munmap(c->sprite.shmem.addr, c->sprite.shmem.size)) {
+		printf("unable to unmap shared memory: %p, %d\n",
+				(void *)c->sprite.shmem.addr, c->sprite.shmem.size);
+		return -1;
+	}
+	free(c);
+	return 0;
+}
+
 static int spr16_server_removeclient(int fd)
 {
 	struct client *prev, *cl;
@@ -130,7 +142,6 @@ static int spr16_server_removeclient(int fd)
 	if (g_focused_client == cl)
 		g_focused_client = NULL;
 
-	/* TODO free sprites, TODO unmap memory */
 	if (epoll_ctl(g_epoll_fd, EPOLL_CTL_DEL, fd, NULL)) {
 		printf("epoll_ctl(del): %s\n", STRERR);
 		free(cl);
@@ -138,12 +149,10 @@ static int spr16_server_removeclient(int fd)
 		return -1;
 	}
 
-
-	/* TODO send disconnect ack */
 	spr16_send_ack(fd, SPRITE_NACK, SPRITENACK_DISCONNECT);
-	free(cl);
 	close(fd);
-	printf("client removed\n");
+	if (spr16_server_freeclient(cl))
+		return -1;
 	return 0;
 }
 
@@ -177,7 +186,6 @@ int spr16_server_register_sprite(int fd, struct spr16_msgdata_register_sprite *r
 		printf("bad client\n");
 		return -1;
 	}
-	/* TODO send nacks */
 	if (reg->width > g_width || !reg->width) {
 		printf("bad width\n");
 		spr16_send_ack(fd, SPRITE_NACK, SPRITENACK_WIDTH);
