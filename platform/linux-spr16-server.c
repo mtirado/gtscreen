@@ -381,7 +381,8 @@ static int spr16_accept_connection(struct epoll_event *ev)
 		newsock = accept4(ev->data.fd, (struct sockaddr *)&addr,
 				&addrlen, SOCK_NONBLOCK|SOCK_CLOEXEC);
 		printf("got new socket: %d\n", newsock);
-		/* TODO we should rate limit this */
+		/* TODO we should rate limit this per uid, and timeout drop,
+		 * also add a handshake timeout */
 		if (spr16_server_addclient(newsock)) {
 			close(newsock);
 			return -1;

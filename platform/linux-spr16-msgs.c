@@ -16,6 +16,7 @@
 #define STRERR strerror(errno)
 
 #define MAX_MSGBUF_READ (512 - SPRITE_MAXMSGLEN)
+#define MIN_MSGBUF_READ (sizeof(struct spr16_msghdr)+2)
 char g_msgbuf[MAX_MSGBUF_READ+SPRITE_MAXMSGLEN];
 static void print_bytes(char *buf, const uint16_t len)
 {
@@ -151,7 +152,7 @@ char *spr16_read_msgs(int fd, uint32_t *outlen)
 		}
 	}
 
-	if (r > (int)sizeof(g_msgbuf)) {
+	if (r > (int)sizeof(g_msgbuf) || r < (int)MIN_MSGBUF_READ) {
 		errno = EPROTO;
 		return NULL;
 	}
