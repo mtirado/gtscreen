@@ -7,6 +7,7 @@
 #include <sys/epoll.h>
 #include <memory.h>
 #include <unistd.h>
+#include <time.h>
 #include "../protocol/spr16.h"
 #include "game.h"
 
@@ -26,6 +27,7 @@ int handle_servinfo(struct spr16_msgdata_servinfo *sinfo)
 int main(int argc, char *argv[])
 {
 	struct spr16 *screen;
+	struct timespec tcur, tlast;
 	int r;
 
 	if (argc < 2) {
@@ -33,10 +35,13 @@ int main(int argc, char *argv[])
 		printf("e.g: spr16_example tty1\n");
 		return -1;
 	}
+
 	/* line buffer output */
 	setvbuf(stdout, NULL, _IOLBF, 0);
 	setvbuf(stderr, NULL, _IOLBF, 0);
 
+	if (clock_gettime(CLOCK_MONOTONIC_RAW, &tlast))
+		return -1;
 	if (spr16_client_init())
 		return -1;
 	spr16_client_set_servinfo_handler(handle_servinfo);
@@ -59,6 +64,8 @@ int main(int argc, char *argv[])
 		return -1;
 	while (1)
 	{
+		unsigned int usec;
+		struct timespec elapsed;
 		r = spr16_client_update();
 		if (r == -1) {
 			printf("spr16 update error\n");
@@ -66,9 +73,26 @@ int main(int argc, char *argv[])
 		}
 		if (game_update())
 			return -1;
-		usleep(8000); /* reduce single buffer tearing */
-		if (game_draw())
+
+		/* rate limit syncs, don't nuke the server */
+		if (clock_gettime(CLOCK_MONOTONIC_RAW, &tcur))
 			return -1;
+		elapsed.tv_sec  = tcur.tv_sec - tlast.tv_sec;
+		if (!elapsed.tv_sec) {
+			elapsed.tv_nsec = tcur.tv_nsec - tlast.tv_nsec;
+			usec = elapsed.tv_nsec / 1000;
+		}
+		else {
+			usec = ((1000000000 - tlast.tv_nsec) + tcur.tv_nsec) / 1000;
+			usec += (elapsed.tv_sec-1) * 1000000;
+		}
+		if (usec >= 32000) { /* roughly 30fps */
+			tlast = tcur;
+			if (game_draw())
+				return -1;
+		}
+		/* spare client cpu usage */
+		usleep(500);
 	}
 	spr16_client_shutdown();
 
