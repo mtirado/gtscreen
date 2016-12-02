@@ -120,7 +120,10 @@ int vt_init(int tty_fd, unsigned int kbd_mode)
 	memcpy(&g_origterm, &tms, sizeof(struct termios));
 	/* set terminal to raw mode */
 	cfmakeraw(&tms);
-	tms.c_lflag |= ISIG; /* get intr/quit */
+	tms.c_lflag |= ISIG; /* get signals */
+
+	tms.c_cflag |= CS8;
+
 	/* disable controls chars */
 	tms.c_cc[VDISCARD]  = _POSIX_VDISABLE;
 	tms.c_cc[VEOF]	    = _POSIX_VDISABLE;
@@ -150,5 +153,3 @@ int vt_init(int tty_fd, unsigned int kbd_mode)
 
 	return 0;
 }
-
-

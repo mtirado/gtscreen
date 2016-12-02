@@ -66,7 +66,7 @@ int main(int argc, char *argv[])
 	{
 		unsigned int usec;
 		struct timespec elapsed;
-		r = spr16_client_update();
+		r = spr16_client_update(0);
 		if (r == -1) {
 			printf("spr16 update error\n");
 			return -1;

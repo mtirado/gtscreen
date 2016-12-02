@@ -1,5 +1,10 @@
 /* (c) 2016 Michael R. Tirado -- GPLv3, GNU General Public License version 3.
  *
+ * a separate input driver may not be needed, i need to do a little more
+ * poking around to be certain. this works decently, though it could be
+ * optimized a bit... anyway, look in to if we can run this with a single
+ * driver, and if so remove that CLONE_VM hack needed to set the
+ * faux11input driver fd, because it loads after graphics driver.
  */
 
 #define _GNU_SOURCE
@@ -25,12 +30,14 @@
 input_handler g_input_func;
 servinfo_handler g_servinfo_func;
 
-struct spr16 g_sprite;
-struct spr16_msgdata_servinfo g_servinfo;
+/* TODO we probably want a client context */
+static struct spr16 g_sprite;
+static struct spr16_msgdata_servinfo g_servinfo;
+static int g_socket;
+
 struct epoll_event g_events[MAX_EPOLL];
 struct epoll_event g_ev;
 int g_epoll_fd;
-int g_socket;
 int g_handshaking;
 
 struct spr16_msgdata_servinfo *spr16_client_get_servinfo()
@@ -72,13 +79,13 @@ int spr16_client_connect(char *name)
 		return -1;
 
 	if (connect(g_socket, (struct sockaddr *)&addr, sizeof(addr))) {
-		printf("connect(%s): %s\n", addr.sun_path, STRERR);
+		fprintf(stderr, "connect(%s): %s\n", addr.sun_path, STRERR);
 		return -1;
 	}
 
 	g_epoll_fd = epoll_create1(EPOLL_CLOEXEC);
 	if (g_epoll_fd == -1) {
-		printf("epoll_create1: %s\n", STRERR);
+		fprintf(stderr, "epoll_create1: %s\n", STRERR);
 		close(g_socket);
 		return -1;
 	}
@@ -87,10 +94,9 @@ int spr16_client_connect(char *name)
 	g_ev.events = EPOLLIN;
 	g_ev.data.fd = g_socket;
 	if (epoll_ctl(g_epoll_fd, EPOLL_CTL_ADD, g_socket, &g_ev)) {
-		printf("epoll_ctl(add): %s\n", STRERR);
+		fprintf(stderr, "epoll_ctl(add): %s\n", STRERR);
 		goto failure;
 	}
-	printf("client connected\n");
 	return g_socket;
 failure:
 	close(g_epoll_fd);
@@ -98,12 +104,13 @@ failure:
 	return -1;
 }
 
-/* TODO check to see if glibc decided to finally implement this, or what? */
 #ifdef __i386__
 /* including fcntl.h is giving me redefinitions, this is hacky and i'm sorry */
 extern int fcntl(int __fd, int __cmd, ...);
 int memfd_create(const char *__name, unsigned int __flags)
 {
+	/* wow this is blows up on 4.8.3 when called from an xorg driver */
+#if 0
 	int retval = -1;
 	__asm__("movl $356, %eax");    /* syscall number */
 	__asm__("movl 8(%ebp), %ebx"); /* name */
@@ -113,12 +120,15 @@ int memfd_create(const char *__name, unsigned int __flags)
 	(void) __name;
 	(void) __flags;
 	return retval;
+#endif
+	/* TODO detect arch, 356 is x86 */
+	return syscall(356, __name, __flags);
 }
 #else
 	#error "unsupported kernel arch (no syscall wrapper for memfd, afaik)"
 #endif
 
-static int spr16_create_memfd(uint16_t width, uint16_t height, uint8_t bpp)
+int spr16_create_memfd(uint16_t width, uint16_t height, uint8_t bpp)
 {
 	uint32_t shmsize;
 	int memfd = -1;
@@ -127,23 +137,23 @@ static int spr16_create_memfd(uint16_t width, uint16_t height, uint8_t bpp)
 	unsigned int checkseals;
 
 	/* TODO round up for vectorized ops? */
-	shmsize = width * height * bpp;
+	shmsize = width * height * (bpp/8);
 	if (!shmsize)
 		return -1;
 
 	/* create sprite memory region */
 	memfd = memfd_create("sprite16", MFD_ALLOW_SEALING);
 	if (memfd == -1) {
-		printf("create error: %s\n", STRERR);
+		fprintf(stderr, "create error: %s\n", STRERR);
 		return -1;
 	}
        	if (ftruncate(memfd, shmsize) == -1) {
-		printf("truncate error: %s\n", STRERR);
+		fprintf(stderr, "truncate error: %s\n", STRERR);
 		goto failure;
 	}
 	addr = mmap(0, shmsize, PROT_READ|PROT_WRITE, MAP_SHARED, memfd, 0);
 	if (addr == MAP_FAILED) {
-		printf("mmap error: %s\n", STRERR);
+		fprintf(stderr, "mmap error: %s\n", STRERR);
 		goto failure;
 	}
 
@@ -153,7 +163,7 @@ static int spr16_create_memfd(uint16_t width, uint16_t height, uint8_t bpp)
 		| F_SEAL_SEAL;
 		/*| F_SEAL_WRITE_PEER */
 	if (fcntl(memfd, F_ADD_SEALS, seals) == -1) {
-		printf("seal error: %s\n", STRERR);
+		fprintf(stderr, "seal error: %s\n", STRERR);
 		goto failure;
 	}
 	checkseals = (unsigned int)fcntl(memfd, F_GET_SEALS);
@@ -166,10 +176,11 @@ static int spr16_create_memfd(uint16_t width, uint16_t height, uint8_t bpp)
 	return 0;
 
 failure:
+	fprintf(stderr, "fail\n");
 	close(memfd);
 	if (addr) {
 		if (munmap(addr, shmsize)) {
-			printf("munmap failed; %s\n", STRERR);
+			fprintf(stderr, "munmap failed; %s\n", STRERR);
 		}
 	}
 	return -1;
@@ -184,7 +195,7 @@ int spr16_client_handshake_start(char *name, uint16_t width, uint16_t height)
 	memset(&data, 0, sizeof(data));
 
 	if (width > g_servinfo.width || height > g_servinfo.height) {
-		printf("sprite size(%d, %d) -- server max(%d, %d)\n",
+		fprintf(stderr, "sprite size(%d, %d) -- server max(%d, %d)\n",
 				width,height,g_servinfo.width,g_servinfo.height);
 		return -1;
 	}
@@ -194,13 +205,12 @@ int spr16_client_handshake_start(char *name, uint16_t width, uint16_t height)
 	data.bpp = bpp;
 	snprintf(data.name, SPRITE_MAXNAME, "%s", name);
 	if (spr16_write_msg(g_socket, &hdr, &data, sizeof(data))) {
-		printf("spr16_servinfo write_msg: %s\n", STRERR);
+		fprintf(stderr, "spr16_servinfo write_msg: %s\n", STRERR);
 		return -1;
 	}
 	g_sprite.bpp = bpp;
 	g_sprite.width = width;
 	g_sprite.height = height;
-	printf("client send register\n");
 	return 0;
 }
 
@@ -227,11 +237,11 @@ static int handle_ack(struct spr16_msgdata_ack *ack)
 		if (spr16_create_memfd(g_sprite.width,
 				       g_sprite.height,
 				       g_sprite.bpp)) {
-			printf("could not create memfd\n");
+			fprintf(stderr, "could not create memfd\n");
 			return -1;
 		}
 		if (afunix_send_fd(g_socket, g_sprite.shmem.fd)) {
-			printf("could not send descriptor\n");
+			fprintf(stderr, "could not send descriptor\n");
 			return -1;
 		}
 		break;
@@ -239,7 +249,7 @@ static int handle_ack(struct spr16_msgdata_ack *ack)
 		g_handshaking = 0;
 		break;
 	default:
-		printf("unknown ack\n");
+		fprintf(stderr, "unknown ack\n");
 		return -1;
 	}
 	return 0;
@@ -249,23 +259,23 @@ static int handle_nack(struct spr16_msgdata_ack *nack)
 	switch (nack->info)
 	{
 	case SPRITENACK_DISCONNECT:
-		printf("nack: disconnected\n");
+		fprintf(stderr, "nack: disconnected\n");
 		errno = ECONNRESET;
 		return -1;
 	case SPRITENACK_SHMEM:
-		printf("nack: shared memory erro\n");
+		fprintf(stderr, "nack: shared memory erro\n");
 		break;
 	case SPRITENACK_WIDTH:
-		printf("nack: bad width\n");
+		fprintf(stderr, "nack: bad width\n");
 		break;
 	case SPRITENACK_HEIGHT:
-		printf("nack: bad height\n");
+		fprintf(stderr, "nack: bad height\n");
 		break;
 	case SPRITENACK_BPP:
-		printf("nack: bad bpp\n");
+		fprintf(stderr, "nack: bad bpp\n");
 		break;
 	default:
-		printf("unhandled nack: %d\n", nack->info);
+		fprintf(stderr, "unhandled nack: %d\n", nack->info);
 		errno = EPROTO;
 		return -1;
 	}
@@ -293,42 +303,44 @@ int spr16_client_sync(uint16_t x, uint16_t y, uint16_t width, uint16_t height)
 	data.width = width;
 	data.height = height;
 	if (spr16_write_msg(g_socket, &hdr, &data, sizeof(data))) {
-		printf("spr16_servinfo write_msg: %s\n", STRERR);
+		/*fprintf(stderr, "spr16_servinfo write_msg : %s\n", STRERR);*/
 		return -1;
 	}
 	return 0;
 }
 
-int spr16_client_update()
+int spr16_client_update(const int poll_timeout)
 {
 	int i;
 	int evcount;
 	char *msgbuf;
 	uint32_t msglen;
 interrupted:
-	evcount = epoll_wait(g_epoll_fd, g_events, MAX_EPOLL, 0);
+	errno = 0;
+	evcount = epoll_wait(g_epoll_fd, g_events, MAX_EPOLL,
+			(poll_timeout < 0) ? -1 : poll_timeout);
 	if (evcount == -1) {
 		if (errno == EINTR) {
 			goto interrupted;
 		}
-		printf("epoll_wait: %s\n", STRERR);
+		fprintf(stderr, "epoll_wait: %s\n", STRERR);
 		return -1;
 	}
 	for (i = 0; i < evcount; ++i)
 	{
 		if (g_events[i].data.fd == g_socket) {
-			/* read and dispatch */
 			msgbuf = spr16_read_msgs(g_socket, &msglen);
 			if (msgbuf == NULL) {
-				printf("read_msgs: %s\n", STRERR);
+				fprintf(stderr, "read_msgs: %s\n", STRERR);
 				return -1;
 			}
 			if (spr16_dispatch_msgs(g_socket, msgbuf, msglen)) {
-				printf("dispatch_msgs: %s\n", STRERR);
+				fprintf(stderr, "dispatch_msgs: %s\n", STRERR);
 				return -1;
 			}
 		}
 		else {
+			fprintf(stderr, "badf\n");
 			errno = EBADF;
 			return -1;
 		}
@@ -338,19 +350,19 @@ interrupted:
 
 int spr16_client_handshake_wait(uint32_t timeout)
 {
+	uint32_t c = 0;
+	/* milliseconds */
 	if (timeout < 100)
 		timeout = 100;
-	while(timeout)
+	while(1)
 	{
-		/* milliseconds */
-		usleep(1000);
-		if (spr16_client_update())
+		if (spr16_client_update(1) && errno != EBADF)
 			return -1;
 		if (!g_handshaking)
-			break;
-		--timeout;
+			return 0;
+		if (++c > timeout)
+			return -1;
 	}
-	return 0;
 }
 
 int spr16_client_shutdown()

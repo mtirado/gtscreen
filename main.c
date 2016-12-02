@@ -68,7 +68,7 @@ static void sig_setup()
 int exec_loop(int tty)
 {
 	int listen_socket;
-
+	int tmpevdev;
 	listen_socket = spr16_server_init(g_state.sfb->width,
 					  g_state.sfb->height,
 					  g_state.sfb->bpp);
@@ -76,7 +76,14 @@ int exec_loop(int tty)
 		printf("server init failed\n");
 		return -1;
 	}
-	if (spr16_server_init_input(tty)) {
+	(void)tty;
+	tmpevdev = open("/dev/input/event1", O_RDONLY);
+	if (tmpevdev == -1) {
+		printf("open: %s\n", STRERR);
+		return -1;
+	}
+	/* TODO turn off kbd if using evdev */
+	if (spr16_server_init_input(-1, tmpevdev)) {
 		printf("input init failed\n");
 		return -1;
 	}
@@ -170,6 +177,7 @@ int main()
 		goto free_ret;
 	}*/
 	tty = 0;
+	/*K_XLATE, or K_MEDIUMRAW for keycodes, RAW is 8 bits*/
 	if (vt_init(tty, K_XLATE)) {
 		return -1;
 	}

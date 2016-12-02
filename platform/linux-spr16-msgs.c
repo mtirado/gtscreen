@@ -23,9 +23,9 @@ static void print_bytes(char *buf, const uint16_t len)
 	int i;
 	for (i = 0; i < len; ++i)
 	{
-		printf("|%d", buf[i]);
+		fprintf(stderr, "|%d", buf[i]);
 	}
-	printf("\n");
+	fprintf(stderr, "\n");
 }
 
 uint32_t get_msghdr_typelen(struct spr16_msghdr *hdr)
@@ -43,7 +43,7 @@ uint32_t get_msghdr_typelen(struct spr16_msghdr *hdr)
 	case SPRITEMSG_SYNC:
 		return (uint32_t)sizeof(struct spr16_msgdata_sync);
 	default:
-		printf("bad type(%d)\n", hdr->type);
+		fprintf(stderr, "bad type(%d)\n", hdr->type);
 		print_bytes(g_msgbuf, 32);
 		return 0xffffffff;
 	}
@@ -63,7 +63,7 @@ int spr16_write_msg(int fd, struct spr16_msghdr *hdr,
 interrupted:
 	if (writev(fd, iov, 2) == -1) {
 		if (errno == EINTR) {
-			if (++intr_count > 100) {
+			if (++intr_count > 1000) {
 				errno = EAGAIN;
 				return -1;
 			}
@@ -110,7 +110,7 @@ static int spr16_reassemble_fragment(int fd)
 	else if (fragbytes < 2) {
 		/* fragment == 1 byte, this shouldn't happen. if it does
 		 * make sure read buffer + all structs divide by 2 evenly */
-		printf("check struct alignment.\n");
+		fprintf(stderr, "check struct alignment.\n");
 		errno = EPROTO;
 		return -1;
 	}
@@ -171,7 +171,7 @@ int spr16_send_ack(int fd, uint16_t ack, uint16_t ackinfo)
 	data.ack = ack;
 	data.info = ackinfo;
 	if (spr16_write_msg(fd, &hdr, &data, sizeof(data))) {
-		printf("spr16_servinfo write_msg: %s\n", STRERR);
+		fprintf(stderr, "spr16_servinfo write_msg: %s\n", STRERR);
 		return -1;
 	}
 	return 0;
@@ -201,24 +201,27 @@ int spr16_dispatch_msgs(int fd, char *msgbuf, uint32_t buflen)
 		switch (msghdr->type)
 		{
 		case SPRITEMSG_SERVINFO:
-			if (spr16_server_servinfo(fd))
+			if (spr16_server_servinfo(fd)) {
+				fprintf(stderr, "servinfo failed\n");
 				return -1;
+			}
 			break;
 		case SPRITEMSG_REGISTER_SPRITE:
 			if (spr16_server_register_sprite(fd,
 					(struct spr16_msgdata_register_sprite *)
 					msgdata)) {
+				fprintf(stderr, "register failed\n");
 				return -1;
 			}
 			break;
 		case SPRITEMSG_SYNC:
 			if (spr16_server_sync((struct spr16_msgdata_sync *)msgdata)) {
-				printf("sync failed\n");
+				fprintf(stderr, "sync failed\n");
 				return -1;
 			}
 			break;
 		default:
-			printf("unknown msg type\n");
+			fprintf(stderr, "unknown msg type\n");
 			errno = EPROTO;
 			return -1;
 		}
@@ -229,17 +232,20 @@ int spr16_dispatch_msgs(int fd, char *msgbuf, uint32_t buflen)
 		case SPRITEMSG_SERVINFO:
 			if (spr16_client_servinfo(
 					(struct spr16_msgdata_servinfo *)msgdata)) {
+				fprintf(stderr, "servinfo failed\n");
 				return -1;
 			}
 			break;
 		case SPRITEMSG_ACK:
 			if (spr16_client_ack((struct spr16_msgdata_ack *)msgdata)) {
+				fprintf(stderr, "ack failed\n");
 				return -1;
 			}
 			break;
 		case SPRITEMSG_INPUT_KEYBOARD:
 			if (spr16_client_input_keyboard(
 					(struct spr16_msgdata_input_keyboard *)msgdata)){
+				fprintf(stderr, "input_keyboard failed\n");
 				return -1;
 			}
 			break;
@@ -268,7 +274,7 @@ int afunix_send_fd(int sock, int fd)
 	int  i;
 
 	if (sock == -1 || fd == -1) {
-		printf("invalid descriptor\n");
+		fprintf(stderr, "invalid descriptor\n");
 		return -1;
 	}
 
@@ -299,9 +305,9 @@ int afunix_send_fd(int sock, int fd)
 	}
 
 	if (retval != (int)iov.iov_len){
-		printf("sendmsg returned: %d\n", retval);
+		fprintf(stderr, "sendmsg returned: %d\n", retval);
 		if (retval == -1)
-			printf("sendmsg error(%d): %s\n",
+			fprintf(stderr, "sendmsg error(%d): %s\n",
 					retval, strerror(errno));
 		return -1;
 	}
@@ -356,26 +362,26 @@ int afunix_recv_fd(int sock, int *fd_out)
 	}
 	cmhp = CMSG_FIRSTHDR(&msgh);
 	if (cmhp == NULL) {
-		printf("recv_fd error, no message header\n");
+		fprintf(stderr, "recv_fd error, no message header\n");
 		return -1;
 	}
 	if ( cmhp->cmsg_len != CMSG_LEN(sizeof(int))) {
-		printf("cmhp(%p)\n", (void *)cmhp);
-		printf("bad cmsg header / message length\n");
+		fprintf(stderr, "cmhp(%p)\n", (void *)cmhp);
+		fprintf(stderr, "bad cmsg header / message length\n");
 		return -1;
 	}
 	if (cmhp->cmsg_level != SOL_SOCKET) {
-		printf("cmsg_level != SOL_SOCKET");
+		fprintf(stderr, "cmsg_level != SOL_SOCKET");
 		return -1;
 	}
 	if (cmhp->cmsg_type != SCM_RIGHTS) {
-		printf("cmsg_type != SCM_RIGHTS");
+		fprintf(stderr, "cmsg_type != SCM_RIGHTS");
 		return -1;
 	}
 
 	fd = *((int *) CMSG_DATA(cmhp));
 	if (data != 'F') {
-		printf("received an improper file, closing.\n");
+		fprintf(stderr, "received an improper file, closing.\n");
 		close(fd);
 		return -1;
 	}

@@ -29,10 +29,9 @@
  * struct padding on various architectures. you would want to add some sync
  * compression in addition to proper serialization if taking that route.
  *
- * TODO look into DRM overlays.
  */
 
-/* XXX NOTE: all struct must be evenly sized / divide evenly by 2, unless you
+/* XXX NOTE: all structs must be evenly sized / divide evenly by 2, unless you
  * want to handle adding a triple read when msg truncates with 1 byte fragment
  */
 
@@ -81,16 +80,14 @@ enum {
 /* bit flags */
 #define SPRITE_VISIBLE 1
 
-struct spr16_shmem
-{
+struct spr16_shmem {
 	char *addr;
 	int fd;
 	uint32_t size;
 };
 
 /* sprite object */
-struct spr16
-{
+struct spr16 {
 	char name[SPRITE_MAXNAME];
 	struct spr16_shmem shmem;
 	uint32_t flags;
@@ -102,14 +99,12 @@ struct spr16
 	uint16_t bpp;
 };
 
-
 /*
  * the msghdr is immediately followed by specific msgdata struct
  * these two structs should be written in the same write call
  * with no possibility of truncated writes.
  */
-struct spr16_msghdr
-{
+struct spr16_msghdr {
 	uint16_t type;
 	uint16_t id;
 	/* if you add to this be warned, linux platform code assumes this struct is only
@@ -117,8 +112,7 @@ struct spr16_msghdr
 	 */
 };
 
-struct spr16_msgdata_servinfo
-{
+struct spr16_msgdata_servinfo {
 	uint16_t width;
 	uint16_t height;
 	uint16_t bpp;
@@ -126,8 +120,7 @@ struct spr16_msgdata_servinfo
 
 /* this message is immediately followed by 1 byte SCM_RIGHTS message
  * to transfer sprite file descriptor to server process */
-struct spr16_msgdata_register_sprite
-{
+struct spr16_msgdata_register_sprite {
 	char name[SPRITE_MAXNAME];
 	uint16_t width;
 	uint16_t height;
@@ -136,25 +129,71 @@ struct spr16_msgdata_register_sprite
 };
 
 /* can be ack or nack, with some info */
-struct spr16_msgdata_ack
-{
+struct spr16_msgdata_ack {
 	uint16_t info;
 	uint16_t ack; /* 0 == nack */
 };
 
 /* client requesting synchronization */
-struct spr16_msgdata_sync
-{
+struct spr16_msgdata_sync {
 	uint16_t x;
 	uint16_t y;
 	uint16_t width;
 	uint16_t height;
 };
 
-#define SPR16_KBD_DOWN 0x0001
-#define SPR16_KBD_UP   0x0002
-struct spr16_msgdata_input_keyboard
-{
+/* keyboard flags */
+#define SPR16_INPUT_RELEASE	0x0001 /* event button/keyup */
+#define SPR16_INPUT_STDIN	0x0002 /* stdin input mode (raw bytes in) */
+#define SPR16_KBD_SHIFT  	0x0004 /* request  shift state */
+#define SPR16_KBD_CTRL	 	0x0008 /* TODO     ctrl  state */
+#define SPR16_KBD_ALT 	 	0x0010 /* TODO     alt   state */
+
+enum {
+	SPR16_KEYCODE_LSHIFT = 0x0100, /* beginning of non-ascii values */
+	SPR16_KEYCODE_RSHIFT,
+	SPR16_KEYCODE_LCTRL,
+	SPR16_KEYCODE_RCTRL,
+	SPR16_KEYCODE_LALT,
+	SPR16_KEYCODE_RALT,
+	SPR16_KEYCODE_UP,
+	SPR16_KEYCODE_CAPSLOCK,
+	SPR16_KEYCODE_DOWN,
+	SPR16_KEYCODE_LEFT,
+	SPR16_KEYCODE_RIGHT,
+	SPR16_KEYCODE_PAGEUP,
+	SPR16_KEYCODE_PAGEDOWN,
+	SPR16_KEYCODE_HOME,
+	SPR16_KEYCODE_END,
+	SPR16_KEYCODE_INSERT,
+	SPR16_KEYCODE_DELETE,
+	SPR16_KEYCODE_F1,
+	SPR16_KEYCODE_F2,
+	SPR16_KEYCODE_F3,
+	SPR16_KEYCODE_F4,
+	SPR16_KEYCODE_F5,
+	SPR16_KEYCODE_F6,
+	SPR16_KEYCODE_F7,
+	SPR16_KEYCODE_F8,
+	SPR16_KEYCODE_F9,
+	SPR16_KEYCODE_F10,
+	SPR16_KEYCODE_F11,
+	SPR16_KEYCODE_F12,
+	SPR16_KEYCODE_F13,
+	SPR16_KEYCODE_F14,
+	SPR16_KEYCODE_F15,
+	SPR16_KEYCODE_F16,
+	SPR16_KEYCODE_F17,
+	SPR16_KEYCODE_F18,
+	SPR16_KEYCODE_F19,
+	SPR16_KEYCODE_F20,
+	SPR16_KEYCODE_F21,
+	SPR16_KEYCODE_F22,
+	SPR16_KEYCODE_F23,
+	SPR16_KEYCODE_F24
+};
+
+struct spr16_msgdata_input_keyboard {
 	uint16_t flags;
 	uint16_t keycode;
 };
@@ -184,7 +223,7 @@ int spr16_client_handshake_wait(uint32_t timeout);
 int spr16_client_servinfo(struct spr16_msgdata_servinfo *sinfo);
 /* TODO pixel formats */
 int spr16_client_register_sprite(char *name, uint16_t width, uint16_t height);
-int spr16_client_update();
+int spr16_client_update(int poll_timeout); /* milliseconds, <0 blocks */
 int spr16_client_shutdown();
 struct spr16_msgdata_servinfo *spr16_client_get_servinfo();
 int spr16_client_ack(struct spr16_msgdata_ack *ack);
@@ -205,7 +244,7 @@ int spr16_server_sync(struct spr16_msgdata_sync *region);
 int spr16_server_register_sprite(int fd, struct spr16_msgdata_register_sprite *reg);
 int spr16_server_update();
 int spr16_open_memfd(struct spr16_msgdata_register_sprite *reg);
-int spr16_server_init_input(int fd);
+int spr16_server_init_input(int ascii_kbd, int evdev_kbd);
 int spr16_server_shutdown(int listen_fd);
 
 /*
