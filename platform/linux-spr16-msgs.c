@@ -36,8 +36,8 @@ uint32_t get_msghdr_typelen(struct spr16_msghdr *hdr)
 		return (uint32_t)sizeof(struct spr16_msgdata_servinfo);
 	case SPRITEMSG_REGISTER_SPRITE:
 		return (uint32_t)sizeof(struct spr16_msgdata_register_sprite);
-	case SPRITEMSG_INPUT_KEYBOARD:
-		return (uint32_t)sizeof(struct spr16_msgdata_input_keyboard);
+	case SPRITEMSG_INPUT:
+		return (uint32_t)sizeof(struct spr16_msgdata_input);
 	case SPRITEMSG_ACK:
 		return (uint32_t)sizeof(struct spr16_msgdata_ack);
 	case SPRITEMSG_SYNC:
@@ -242,10 +242,9 @@ int spr16_dispatch_msgs(int fd, char *msgbuf, uint32_t buflen)
 				return -1;
 			}
 			break;
-		case SPRITEMSG_INPUT_KEYBOARD:
-			if (spr16_client_input_keyboard(
-					(struct spr16_msgdata_input_keyboard *)msgdata)){
-				fprintf(stderr, "input_keyboard failed\n");
+		case SPRITEMSG_INPUT:
+			if (spr16_client_input((struct spr16_msgdata_input *)msgdata)) {
+				fprintf(stderr, "input failed\n");
 				return -1;
 			}
 			break;

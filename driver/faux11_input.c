@@ -86,11 +86,13 @@ static uint32_t ctrl_to_x11(unsigned char c)
 
 static uint32_t to_x11(uint16_t k_c)
 {
-	if (k_c <= 255) /* ascii */
+	if (k_c <= 0x00ff) /* ascii */ {
 		return k_c;
+	}
 
 	switch (k_c)
 	{
+		case SPR16_KEYCODE_CAPSLOCK:	return XK_Caps_Lock;
 		case SPR16_KEYCODE_LSHIFT:	return XK_Shift_L;
 		case SPR16_KEYCODE_RSHIFT:	return XK_Shift_R;
 		case SPR16_KEYCODE_LCTRL:	return XK_Control_L;
@@ -141,7 +143,7 @@ static uint32_t to_x11(uint16_t k_c)
  * or if i can just cache them here indefinitely. TODO figure out.
  * if the size never changes we can at least eliminate malloc from this mess.
  */
-static uint32_t spr16_to_x11(DeviceIntPtr dev, struct spr16_msgdata_input_keyboard msg)
+static uint32_t spr16_to_x11(DeviceIntPtr dev, struct spr16_msgdata_input *msg)
 {
 	unsigned int i, w;
 	KeySymsPtr symbols;
@@ -151,18 +153,16 @@ static uint32_t spr16_to_x11(DeviceIntPtr dev, struct spr16_msgdata_input_keyboa
 	symbols = XkbGetCoreMap(dev);
 	if (symbols == NULL) {
 		fprintf(stderr, "XkbGetCoreMap is null\n");
-		return -1;
+		return 0;
 	}
 
-	/*fprintf(stderr, "mapwidth: %d\n", symbols->mapWidth);
-	fprintf(stderr, "minkey: %d\n", symbols->minKeyCode);
-	fprintf(stderr, "maxkey: %d\n", symbols->maxKeyCode);*/
-	if (msg.keycode < ' ') {
-		key = ctrl_to_x11(msg.keycode);
+	if (msg->code < ' ') {
+		key = ctrl_to_x11(msg->code);
 	}
 	else {
-		key = to_x11(msg.keycode);
+		key = to_x11(msg->code);
 	}
+
 	/* ascii keycodes map directly */
 	for (i = symbols->minKeyCode; i < symbols->maxKeyCode; ++i)
 	{
@@ -185,28 +185,29 @@ do_ret:
 	return ret;
 }
 
-static void fx11_stdin_mode(InputInfoPtr info, struct spr16_msgdata_input_keyboard msg)
+static int ascii_kbd_is_shifted(unsigned char c)
 {
-	uint32_t key_code = msg.keycode;
+	return (	(c > 32  && c < 44 && c != 39)
+		|| 	(c > 57  && c < 91 && c != 61 && c != 59)
+		|| 	(c > 93  && c < 96)
+		|| 	(c > 122 && c < 127));
+}
+
+static void fx11_ascii_mode(InputInfoPtr info, struct spr16_msgdata_input *msg)
+{
 	uint32_t k_c;
 	int state_shifted;
 
-	if (key_code == 27) {
-	}
-	/* TODO move shift state calculation from server to here,
-	 * add raw stdin/ascii where raw sends 1 unmodified byte. */
-	state_shifted = msg.flags & SPR16_KBD_SHIFT;
+	state_shifted = ascii_kbd_is_shifted(msg->code);
 	k_c = spr16_to_x11(info->dev, msg);
 
-	/* hack for ascii mode to be usable without proper shift down/up,
-	 * though maybe we can fix this by defining some new control codes
-	 * and abandoning traditional concept of special shift/ctrl/alt keys */
+	/* hack for ascii mode to be usable without proper shift down/up */
 	if (state_shifted) {
-		struct spr16_msgdata_input_keyboard fake_shift;
+		struct spr16_msgdata_input fake_shift;
 		uint32_t shift_key;
-		fake_shift.flags = 0;
-		fake_shift.keycode = 14;
-		shift_key = spr16_to_x11(info->dev, fake_shift);
+		fake_shift.bits = 0;
+		fake_shift.code = 14;
+		shift_key = spr16_to_x11(info->dev, &fake_shift);
 		xf86PostKeyboardEvent(info->dev, shift_key, 1);
 		xf86PostKeyboardEvent(info->dev, k_c, 1);
 		xf86PostKeyboardEvent(info->dev, k_c, 0);
@@ -218,32 +219,68 @@ static void fx11_stdin_mode(InputInfoPtr info, struct spr16_msgdata_input_keyboa
 	}
 }
 
+static void reset_modifiers(InputInfoPtr info)
+{
+	struct spr16_msgdata_input in;
+	uint32_t k_c;
+	memset(&in, 0, sizeof(in));
+	/* this is a bit of a hack, i'm sorry. vt switching causes key up event
+	 * without initial key down, these artificial key ups seem to help out. */
+	in.code = SPR16_KEYCODE_LSHIFT;
+	k_c = spr16_to_x11(info->dev, &in);
+	xf86PostKeyboardEvent(info->dev, k_c, 0);
+	in.code = SPR16_KEYCODE_LALT;
+	k_c = spr16_to_x11(info->dev, &in);
+	xf86PostKeyboardEvent(info->dev, k_c, 0);
+	in.code = SPR16_KEYCODE_LCTRL;
+	k_c = spr16_to_x11(info->dev, &in);
+	xf86PostKeyboardEvent(info->dev, k_c, 0);
+}
+
 static void fx11ReadInput(InputInfoPtr pInfo)
 {
-	struct spr16_msgdata_input_keyboard msgs[1024];
+	struct spr16_msgdata_input msgs[1024];
 	int bytes;
 	unsigned int i;
 intr:
 	errno = 0;
 	bytes = read(pInfo->fd, msgs, sizeof(msgs));
-	if (bytes < sizeof(struct spr16_msgdata_input_keyboard)
-			|| bytes % sizeof(struct spr16_msgdata_input_keyboard)) {
+	if (bytes < sizeof(struct spr16_msgdata_input)
+			|| bytes % sizeof(struct spr16_msgdata_input)) {
 		if (errno == EINTR)
 			goto intr;
 		return;
 	}
 
-	for (i = 0; i < bytes / sizeof(struct spr16_msgdata_input_keyboard); ++i)
+	for (i = 0; i < bytes / sizeof(struct spr16_msgdata_input); ++i)
 	{
-		/* for non-evdev users, TODO add raw lnx_kbd support */
-		if (msgs[i].flags & SPR16_INPUT_STDIN) {
-			fx11_stdin_mode(pInfo, msgs[i]);
-		}
-		else {
-			uint32_t k_c;
-			k_c = spr16_to_x11(pInfo->dev, msgs[i]);
-			xf86PostKeyboardEvent(pInfo->dev, k_c,
-					!(msgs[i].flags & SPR16_INPUT_RELEASE));
+		uint32_t k_c;
+		switch (msgs[i].type)
+		{
+		case SPR16_INPUT_NOTICE:
+			if (msgs[i].code == SPR16_NOTICE_INPUT_FLUSH)
+				reset_modifiers(pInfo); /* vt change */
+			break;
+		case SPR16_INPUT_KEY:
+			k_c = spr16_to_x11(pInfo->dev, &msgs[i]);
+			if (msgs[i].val == 0) {
+				xf86PostKeyboardEvent(pInfo->dev, k_c, 0);
+			}
+			else if (msgs[i].val == 1) {
+				xf86PostKeyboardEvent(pInfo->dev, k_c, 1);
+			}
+			else if (msgs[i].val == 2) {
+				xf86PostKeyboardEvent(pInfo->dev, k_c, 0);
+				xf86PostKeyboardEvent(pInfo->dev, k_c, 1);
+				/* repeat */
+			}
+			break;
+		case SPR16_INPUT_KEY_ASCII:
+			/* this is a fallback */
+			fx11_ascii_mode(pInfo, &msgs[i]);
+			break;
+		default:
+			break;
 		}
 	}
 	return;
@@ -332,16 +369,12 @@ static int xf86VoidControlProc(DeviceIntPtr device, int what)
 			break;
 
 		case DEVICE_ON:
-			fprintf(stderr, "------- DEVICE_ON\n");
 			xf86AddEnabledDevice(pInfo);
 			device->public.on = TRUE;
 			break;
 
 		case DEVICE_OFF:
-			fprintf(stderr, "------- DEVICE_OFF\n");
 		case DEVICE_CLOSE:
-			if (what == DEVICE_CLOSE)
-				fprintf(stderr, "----- DEVICE_CLOSE\n");
 			if (device->public.on == TRUE) {
 				xf86RemoveEnabledDevice(pInfo);
 				device->public.on = FALSE;
@@ -469,31 +502,4 @@ _X_EXPORT XF86ModuleData faux11inputModuleData = {
 };
 
 
-#if 0
-static void print_x11_ksyms(DeviceIntPtr dev)
-{
-	unsigned int i, w;
-	KeySymsPtr symbols;
-
-	symbols = XkbGetCoreMap(dev);
-	if (symbols == NULL) {
-		fprintf(stderr, "null keymap\n");
-		return -1;
-	}
-
-	for (i = symbols->minKeyCode; i < symbols->maxKeyCode; ++i)
-	{
-		for (w = 0; w < symbols->mapWidth; ++w)
-		{
-			KeySym ksm = symbols->map[((i-symbols->minKeyCode)
-						* symbols->mapWidth)
-						+ w];
-				fprintf(stderr, "sym[kc:%d,w:%x] == (%c)0x%x [%d])\n",
-						i,w, (char)ksm, ksm, ksm);
-		}
-	}
-	free(symbols->map);
-	free(symbols);
-}
-#endif
 

@@ -146,9 +146,9 @@ int game_init(struct spr16 *screen)
 	return 0;
 }
 
-int game_input(uint16_t flags, uint16_t keycode)
+int game_input(struct spr16_msgdata_input *input)
 {
-	switch (keycode)
+	switch (input->code)
 	{
 	case 'h':
 		craft_roll(g_moon->player, -10.5f);
@@ -166,7 +166,6 @@ int game_input(uint16_t flags, uint16_t keycode)
 	default:
 		break;
 	}
-	(void)flags;
 	return 0;
 }
 

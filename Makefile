@@ -19,6 +19,7 @@ DBG	:= -g
 GTSCREEN_SRCS := ./main.c			\
 		 ./platform/linux-drm.c		\
 		 ./platform/linux-vt.c		\
+		 ./platform/linux-input.c	\
 		 ./platform/linux-spr16-msgs.c	\
 		 ./platform/linux-spr16-server.c
 

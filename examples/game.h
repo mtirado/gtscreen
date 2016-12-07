@@ -113,7 +113,7 @@ void dynamic_apply_torque(struct dynamic *self,
 			  struct vec2 offset, struct vec2 force);
 
 int game_init();
-int game_input(uint16_t flags, uint16_t keycode);
+int game_input(struct spr16_msgdata_input *input);
 int game_update();
 int game_draw();
 

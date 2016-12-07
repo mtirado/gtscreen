@@ -64,7 +64,7 @@ enum {
  * SERVINFO        - Server sends global parameters to client.
  * REGISTER_SPRITE - This message is handled only once to complete handshake.
  * 		     maps shared memory between server and client.
- * INPUT_KEYBOARD  - Send keyboard event.
+ * INPUT           - Send input event.
  * ACK             - ACK or NACK message.
  * SYNC            - Notify server of modified buffer region.
  *
@@ -72,7 +72,7 @@ enum {
 enum {
 	SPRITEMSG_SERVINFO=123,
 	SPRITEMSG_REGISTER_SPRITE,
-	SPRITEMSG_INPUT_KEYBOARD,
+	SPRITEMSG_INPUT,
 	SPRITEMSG_ACK,
 	SPRITEMSG_SYNC
 };
@@ -142,12 +142,31 @@ struct spr16_msgdata_sync {
 	uint16_t height;
 };
 
-/* keyboard flags */
-#define SPR16_INPUT_RELEASE	0x0001 /* event button/keyup */
-#define SPR16_INPUT_STDIN	0x0002 /* stdin input mode (raw bytes in) */
-#define SPR16_KBD_SHIFT  	0x0004 /* request  shift state */
-#define SPR16_KBD_CTRL	 	0x0008 /* TODO     ctrl  state */
-#define SPR16_KBD_ALT 	 	0x0010 /* TODO     alt   state */
+
+struct spr16_msgdata_input {
+	uint32_t val;
+	uint16_t code;
+	uint8_t  type;
+	uint8_t  bits;
+};
+
+enum {
+	SPR16_INPUT_KEY = 1,   /* full spr16 keycodes */
+	SPR16_INPUT_KEY_ASCII, /* fallback ascii mapped keycodes */
+	SPR16_INPUT_AXIS_RELATIVE,
+	SPR16_INPUT_AXIS_ABSOLUTE,
+	SPR16_INPUT_NOTICE
+};
+
+enum {
+	SPR16_NOTICE_INPUT_FLUSH = 1
+};
+/* TODO implement tracking id's, and should probably make bits type specific,
+ * for better flexibility. ascii can't be raw, no tracking id, etc */
+#define SPR16_INPUT_TRACK_MASK 0x1f /* 5 bit tracking id */
+#define SPR16_INPUT_FLAGS_MASK 0x70 /* 3 bit flags */
+#define SPR16_INPUT_FLAG_RAW   0x20 /* raw bytes, application specific */
+/* 0x40, 0x80 */
 
 enum {
 	SPR16_KEYCODE_LSHIFT = 0x0100, /* beginning of non-ascii values */
@@ -193,12 +212,7 @@ enum {
 	SPR16_KEYCODE_F24
 };
 
-struct spr16_msgdata_input_keyboard {
-	uint16_t flags;
-	uint16_t keycode;
-};
-
-typedef int (*input_handler)(uint16_t flags, uint16_t keycode);
+typedef int (*input_handler)(struct spr16_msgdata_input *input);
 typedef int (*servinfo_handler)(struct spr16_msgdata_servinfo *sinfo);
 
 /*----------------------------------------------*
@@ -223,14 +237,14 @@ int spr16_client_handshake_wait(uint32_t timeout);
 int spr16_client_servinfo(struct spr16_msgdata_servinfo *sinfo);
 /* TODO pixel formats */
 int spr16_client_register_sprite(char *name, uint16_t width, uint16_t height);
-int spr16_client_update(int poll_timeout); /* milliseconds, <0 blocks */
+int spr16_client_update(int poll_timeout); /* timeout in milliseconds, <0 blocks */
 int spr16_client_shutdown();
 struct spr16_msgdata_servinfo *spr16_client_get_servinfo();
 int spr16_client_ack(struct spr16_msgdata_ack *ack);
 struct spr16 *spr16_client_get_sprite();
 /* may return -1 with errno set to EAGAIN, if server buffer is full */
 int spr16_client_sync(uint16_t x, uint16_t y, uint16_t width, uint16_t height);
-int spr16_client_input_keyboard(struct spr16_msgdata_input_keyboard *ki);
+int spr16_client_input(struct spr16_msgdata_input *msg);
 int spr16_client_set_input_handler(input_handler func);
 int spr16_client_set_servinfo_handler(servinfo_handler func);
 
@@ -244,13 +258,10 @@ int spr16_server_sync(struct spr16_msgdata_sync *region);
 int spr16_server_register_sprite(int fd, struct spr16_msgdata_register_sprite *reg);
 int spr16_server_update();
 int spr16_open_memfd(struct spr16_msgdata_register_sprite *reg);
-int spr16_server_init_input(int ascii_kbd, int evdev_kbd);
+int spr16_server_init_input();
 int spr16_server_shutdown(int listen_fd);
 
-/*
- * int spr16_register_sprite(uint32_t id);
- * int spr16_free_sprite(uint32_t id);
- */
+
 
 /*
  * Simple usage scenario:
@@ -270,5 +281,21 @@ int spr16_server_shutdown(int listen_fd);
  */
 
 
+
+/*----------------------------------------------*
+ * input drivers                                *
+ *----------------------------------------------*/
+struct input_device;
+typedef int (*input_read)(struct input_device *self, int client);
+typedef int (*input_flush)(struct input_device *self);
+struct input_device {
+	char path[128];
+	char name[64];
+	struct input_device *next;
+	input_read  func_read;
+	input_flush func_flush;
+	uint32_t private;
+	int fd;
+};
 
 #endif

@@ -15,7 +15,12 @@
 #include <sys/ioctl.h>
 #include <termios.h>
 
+
+sig_atomic_t g_mute_input;
+sig_atomic_t g_unmute_input;
+
 #define STRERR strerror(errno)
+
 
 int g_kbmode;
 int g_ttyfd;
@@ -31,6 +36,7 @@ void vt_sig(int signum)
 			printf("ioctl(VT_RELDISP, VT_ACKACQ): %s\n", STRERR);
 		}
 		drm_acquire_signal();
+		g_unmute_input = 1;
 		break;
 	case SIGUSR2:
 		/* vt is switchign off */
@@ -38,6 +44,7 @@ void vt_sig(int signum)
 		if (ioctl(g_ttyfd, VT_RELDISP, 1) == -1) {
 			printf("ioctl(VT_RELDISP, 1): %s\n", STRERR);
 		}
+		g_mute_input = 1;
 		break;
 	default:
 		break;
@@ -69,6 +76,7 @@ static void vt_setmode_textauto()
 
 void vt_shutdown()
 {
+	g_mute_input = 1;
 	if (ioctl(g_ttyfd, KDSKBMODE, g_kbmode) == -1)
 		printf("ioctl(KDSKBMODE, K_OFF): %s\n", STRERR);
 	vt_setmode_textauto();
@@ -80,6 +88,9 @@ int vt_init(int tty_fd, unsigned int kbd_mode)
 {
 	struct vt_mode vtm;
 	struct termios tms;
+
+	g_mute_input = 1;
+	g_unmute_input = 1; /* flush input */
 
 	g_ttyfd = tty_fd;
 	vt_sig_setup();

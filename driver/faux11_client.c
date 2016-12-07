@@ -120,24 +120,24 @@ static DeviceIntPtr find_keyboard()
 	return NULL;
 }
 
-int handle_input(uint16_t flags, uint16_t keycode)
+int handle_input(struct spr16_msgdata_input *input)
 {
 	InputInfoPtr pInfo;
-	struct spr16_msgdata_input_keyboard kbmsg;
-	kbmsg.flags = flags;
-	kbmsg.keycode = keycode;
 
 	if (g_inputdev == NULL) {
 		g_inputdev = find_keyboard();
 		if (g_inputdev == NULL) {
 			fprintf(stderr, "no keyboard device found\n");
-			return 0; /* 	this could fail, race until input driver loads
+			return 0; /*	this could fail, race until input driver loads
 					remove input driver completely if possible
 					or just deal with this. */
 		}
 	}
 	pInfo = g_inputdev->public.devicePrivate;
-	write((int)pInfo->private, &kbmsg, sizeof(kbmsg));
+	while (write((int)pInfo->private, input,
+				sizeof(*input)) == -1 && errno == EAGAIN) {
+		;
+	}
 
 	return 0;
 }

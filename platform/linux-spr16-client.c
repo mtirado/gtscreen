@@ -377,11 +377,11 @@ int spr16_client_shutdown()
 	return 0;
 }
 
-int spr16_client_input_keyboard(struct spr16_msgdata_input_keyboard *ki)
+int spr16_client_input(struct spr16_msgdata_input *msg)
 {
 	if (!g_input_func)
 		return 0;
-	return g_input_func(ki->flags, ki->keycode);
+	return g_input_func(msg);
 }
 
 /* TODO, either unify all input messages, or split up into multiple handlers */
