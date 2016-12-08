@@ -56,10 +56,15 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <unistd.h>
+#include <linux/input.h>
 #include "faux11.h"
 #include <xorg/input.h>
 #include <xorg/xkbsrv.h>
 #define STRERR strerror(errno)
+
+
+/* how to generalize valuators... */
+ValuatorMask *g_cursor;
 
 /******************************************************************************
  * Function/Macro keys variables
@@ -237,6 +242,62 @@ static void reset_modifiers(InputInfoPtr info)
 	xf86PostKeyboardEvent(info->dev, k_c, 0);
 }
 
+static void axis_relative(struct spr16_msgdata_input *msg)
+{
+	valuator_mask_zero(g_cursor);
+	if (msg->code == REL_X) {
+		valuator_mask_set(g_cursor, REL_X, msg->val);
+	}
+	else if (msg->code == REL_Y) {
+		valuator_mask_set(g_cursor, REL_Y, msg->val);
+	}
+	/* TODO scroll wheel */
+}
+
+static void key_event(InputInfoPtr info, struct spr16_msgdata_input *msg)
+{
+	uint32_t k_c;
+
+	/* button range is BTN_0 ... BTN_GEAR_UP, currently only deals with mouse */
+	if (msg->code >= SPR16_KEYCODE_LBTN && msg->code <= SPR16_KEYCODE_FBTN) {
+		switch (msg->code)
+		{
+			case SPR16_KEYCODE_LBTN:
+				k_c = 1;
+				break;
+			case SPR16_KEYCODE_RBTN:
+				k_c = 2;
+				break;
+			case SPR16_KEYCODE_ABTN:
+				k_c = 3;
+				break;
+				/* from evdev driver:
+				 *  BTN_SIDE ... BTN_JOYSTICK  =  8 + code - BTN_SIDE
+				 *  BTN_0 ... BTN_2 = 1 + code - BTN_0
+				 *  BTN_3 ... BTN_MOUSE - 1 = 8 + code - BTN_3
+				 *
+				 */
+			default:
+				return;
+		}
+		xf86PostButtonEvent(info->dev, Relative, k_c, msg->val == 1, 0, 0);
+		return;
+	}
+
+	k_c = spr16_to_x11(info->dev, msg);
+	if (msg->val == 0) {
+		xf86PostKeyboardEvent(info->dev, k_c, 0);
+	}
+	else if (msg->val == 1) {
+		xf86PostKeyboardEvent(info->dev, k_c, 1);
+	}
+	else if (msg->val == 2) {
+		xf86PostKeyboardEvent(info->dev, k_c, 0);
+		xf86PostKeyboardEvent(info->dev, k_c, 1);
+		/* repeat */
+	}
+}
+
 static void fx11ReadInput(InputInfoPtr pInfo)
 {
 	struct spr16_msgdata_input msgs[1024];
@@ -254,26 +315,19 @@ intr:
 
 	for (i = 0; i < bytes / sizeof(struct spr16_msgdata_input); ++i)
 	{
-		uint32_t k_c;
 		switch (msgs[i].type)
 		{
+		case SPR16_INPUT_AXIS_RELATIVE:
+			axis_relative(&msgs[i]);
+			/* should we accumulate and wait for syn? */
+			xf86PostMotionEventM(pInfo->dev, Relative, g_cursor);
+			break;
 		case SPR16_INPUT_NOTICE:
 			if (msgs[i].code == SPR16_NOTICE_INPUT_FLUSH)
 				reset_modifiers(pInfo); /* vt change */
 			break;
 		case SPR16_INPUT_KEY:
-			k_c = spr16_to_x11(pInfo->dev, &msgs[i]);
-			if (msgs[i].val == 0) {
-				xf86PostKeyboardEvent(pInfo->dev, k_c, 0);
-			}
-			else if (msgs[i].val == 1) {
-				xf86PostKeyboardEvent(pInfo->dev, k_c, 1);
-			}
-			else if (msgs[i].val == 2) {
-				xf86PostKeyboardEvent(pInfo->dev, k_c, 0);
-				xf86PostKeyboardEvent(pInfo->dev, k_c, 1);
-				/* repeat */
-			}
+			key_event(pInfo, &msgs[i]);
 			break;
 		case SPR16_INPUT_KEY_ASCII:
 			/* this is a fallback */
@@ -406,9 +460,11 @@ static int xf86VoidInit(InputDriverPtr drv, InputInfoPtr pInfo,	int flags)
 {
 	int ipc[2];
 	int pipeflags;
+
 	fprintf(stderr, "--------------------------------------------------\n");
 	fprintf(stderr, "- faux11 input init ------------------------------\n");
 	fprintf(stderr, "--------------------------------------------------\n");
+
 	if (pipe2(ipc, O_CLOEXEC|O_NONBLOCK|O_DIRECT)) {
 		fprintf(stderr, "pipe: %s\n", STRERR);
 		return -1;
@@ -432,6 +488,7 @@ static int xf86VoidInit(InputDriverPtr drv, InputInfoPtr pInfo,	int flags)
 		fprintf(stderr, "fcntl: %s\n", STRERR);
 		return -1;
 	}
+
 	/* Initialise the InputInfoRec. */
 	pInfo->type_name = "faux11input";
 	pInfo->device_control = xf86VoidControlProc;
@@ -441,11 +498,18 @@ static int xf86VoidInit(InputDriverPtr drv, InputInfoPtr pInfo,	int flags)
 	pInfo->fd = ipc[0]; /* read end */
 	pInfo->private = (void *)ipc[1]; /* write end for gfx driver, such hacks! */
 
+	/* cursor */
+	g_cursor = valuator_mask_new(CURSOR_AXES);
+	if (g_cursor == NULL) {
+		fprintf(stderr, "valuator_mask_new: %s\n", STRERR);
+		return -1;
+	}
+	valuator_mask_zero(g_cursor);
 	return 0;
 }
 
 _X_EXPORT InputDriverRec FAUX11INPUT = {
-	1,				/* driver version */
+	1,			/* driver version */
 	"faux11input",		/* driver name */
 	NULL,			/* identify */
 	xf86VoidInit,		/* pre-init */

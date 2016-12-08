@@ -168,7 +168,15 @@ static int evdev_translate_keycode(struct input_device *dev,
 		/*case KEY_CAPSLOCK:   data->code = shift ? '' : ''; break;*/
 
 
-
+		/* mouse buttons */
+		case BTN_MOUSE:   data->code = SPR16_KEYCODE_LBTN; break;
+		case BTN_RIGHT:   data->code = SPR16_KEYCODE_RBTN; break;
+		case BTN_MIDDLE:  data->code = SPR16_KEYCODE_ABTN; break;
+		case BTN_SIDE:    data->code = SPR16_KEYCODE_BBTN; break;
+		case BTN_EXTRA:   data->code = SPR16_KEYCODE_CBTN; break;
+		case BTN_FORWARD: data->code = SPR16_KEYCODE_DBTN; break;
+		case BTN_BACK:    data->code = SPR16_KEYCODE_EBTN; break;
+		case BTN_TASK:    data->code = SPR16_KEYCODE_FBTN; break;
 
 
 		/* chars <= 127 */
@@ -277,7 +285,7 @@ interrupted:
 		switch (event->type)
 		{
 		case EV_KEY:
-			data.code = event->code;/*'A'*//*buf[i];*/
+			data.code = event->code;
 			data.type = SPR16_INPUT_KEY;
 			data.val  = event->value;
 			if (evdev_translate_keycode(self, &data)) {
@@ -286,6 +294,8 @@ interrupted:
 		break;
 		case EV_REL:
 			data.type = SPR16_INPUT_AXIS_RELATIVE;
+			data.code = event->code;
+			data.val  = event->value;
 		break;
 		default:
 			continue;
