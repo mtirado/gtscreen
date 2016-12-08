@@ -64,6 +64,7 @@
 
 
 /* how to generalize valuators... */
+#define CURSOR_AXES 3
 ValuatorMask *g_cursor;
 
 /******************************************************************************
@@ -280,6 +281,7 @@ static void key_event(InputInfoPtr info, struct spr16_msgdata_input *msg)
 			default:
 				return;
 		}
+		fprintf(stderr, "button: %d\n", k_c);
 		xf86PostButtonEvent(info->dev, Relative, k_c, msg->val == 1, 0, 0);
 		return;
 	}
