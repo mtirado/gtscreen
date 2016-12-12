@@ -266,16 +266,20 @@ static void dispatch_dirty(ScreenPtr pScreen)
 	RegionPtr dirty = DamageRegion(fx11->damage);
 	unsigned num_cliprects = REGION_NUM_RECTS(dirty);
 	BoxPtr rect = REGION_RECTS(dirty);
-
 	for (unsigned i = 0; i < num_cliprects; i++, rect++) {
 		while(spr16_client_sync(rect->x1,
 					rect->y1,
 					rect->x2 - rect->x1,
 					rect->y2 - rect->y1)) {
+
 			if (errno != EAGAIN) {
-				fprintf(stderr, "spr16 sync error: %s\n", strerror(errno));
+				fprintf(stderr,"spr16 sync error: %s\n",strerror(errno));
 				_exit(-1);
 				break;
+			}
+			else {
+				/* don't keep spinning on EAGAIN! */
+				usleep(10000);
 			}
 		}
 	}

@@ -154,13 +154,9 @@ enum {
 	SPR16_INPUT_KEY = 1,   /* full spr16 keycodes */
 	SPR16_INPUT_KEY_ASCII, /* fallback ascii mapped keycodes */
 	SPR16_INPUT_AXIS_RELATIVE,
-	SPR16_INPUT_AXIS_ABSOLUTE,
-	SPR16_INPUT_NOTICE
+	SPR16_INPUT_AXIS_ABSOLUTE
 };
 
-enum {
-	SPR16_NOTICE_INPUT_FLUSH = 1
-};
 /* TODO implement tracking id's, and should probably make bits type specific,
  * for better flexibility. ascii can't be raw, no tracking id, etc */
 #define SPR16_INPUT_TRACK_MASK 0x1f /* 5 bit tracking id */
@@ -168,7 +164,12 @@ enum {
 #define SPR16_INPUT_FLAG_RAW   0x20 /* raw bytes, application specific */
 /* 0x40, 0x80 */
 
+/* TODO some other ways to vt switch other than linux kernel vt keyboard */
+#define SPR16_KEYMOD_LALT  0x00000001
+#define SPR16_KEYMOD_LCTRL 0x00000002
+
 enum {
+	SPR16_KEYCODE_ESCAPE = 27,
 	SPR16_KEYCODE_LSHIFT = 0x0100, /* beginning of non-ascii values */
 	SPR16_KEYCODE_RSHIFT,
 	SPR16_KEYCODE_LCTRL,
@@ -303,6 +304,7 @@ struct input_device {
 	input_read  func_read;
 	input_flush func_flush;
 	uint32_t private;
+	uint32_t keyflags;
 	int fd;
 };
 

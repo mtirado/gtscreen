@@ -141,9 +141,7 @@ int vt_init(int tty_fd, unsigned int kbd_mode)
 	tms.c_cc[VEOL]	    = _POSIX_VDISABLE;
 	tms.c_cc[VEOL2]	    = _POSIX_VDISABLE;
 	tms.c_cc[VERASE]    = _POSIX_VDISABLE;
-	/* XXX
-	 * tms.c_cc[VINTR]	    = _POSIX_VDISABLE;
-	 */
+	tms.c_cc[VINTR]	    = _POSIX_VDISABLE;
 	tms.c_cc[VKILL]	    = _POSIX_VDISABLE;
 	tms.c_cc[VLNEXT]    = _POSIX_VDISABLE;
 	tms.c_cc[VMIN]	    = 1;

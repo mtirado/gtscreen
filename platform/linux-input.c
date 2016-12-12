@@ -21,7 +21,6 @@
 
 #define STRERR strerror(errno)
 
-
 /* number of longs needed to represent n bits. */
 #define NLONGS(n) ((n + (sizeof(long) * 8)) - 1 / sizeof(long))
 
@@ -240,6 +239,79 @@ static int evdev_translate_keycode(struct input_device *dev,
 	return 0;
 }
 
+/*
+ *  prevent vt switching keys from being sent
+ *  raise sigterm on ctrl-alt-escape
+ */
+static int preempt_keycodes(struct input_device *self, struct spr16_msgdata_input *msg)
+{
+	switch (msg->code)
+	{
+	case SPR16_KEYCODE_F1:
+	case SPR16_KEYCODE_F2:
+	case SPR16_KEYCODE_F3:
+	case SPR16_KEYCODE_F4:
+	case SPR16_KEYCODE_F5:
+	case SPR16_KEYCODE_F6:
+	case SPR16_KEYCODE_F7:
+	case SPR16_KEYCODE_F8:
+	case SPR16_KEYCODE_F9:
+	case SPR16_KEYCODE_F10:
+	case SPR16_KEYCODE_F11:
+	case SPR16_KEYCODE_F12:
+	case SPR16_KEYCODE_F13:
+	case SPR16_KEYCODE_F14:
+	case SPR16_KEYCODE_F15:
+	case SPR16_KEYCODE_F16:
+	case SPR16_KEYCODE_F17:
+	case SPR16_KEYCODE_F18:
+	case SPR16_KEYCODE_F19:
+	case SPR16_KEYCODE_F20:
+	case SPR16_KEYCODE_F21:
+	case SPR16_KEYCODE_F22:
+	case SPR16_KEYCODE_F23:
+	case SPR16_KEYCODE_F24:
+	case SPR16_KEYCODE_LEFT:
+	case SPR16_KEYCODE_RIGHT:
+		if (self->keyflags & SPR16_KEYMOD_LALT) {
+			return 1;
+		}
+		break;
+	case SPR16_KEYCODE_ESCAPE:
+		if ((self->keyflags & (SPR16_KEYMOD_LALT | SPR16_KEYMOD_LCTRL))
+				   == (SPR16_KEYMOD_LALT | SPR16_KEYMOD_LCTRL)) {
+			printf("abrupt screen shutdown\n");
+			raise(SIGTERM);
+			return 1;
+		}
+		break;
+
+	case SPR16_KEYCODE_LALT:
+		if (msg->val == 0) { /* down */
+			if (self->keyflags & SPR16_KEYMOD_LALT)
+				self->keyflags &= ~SPR16_KEYMOD_LALT;
+		}
+		else if (msg->val == 1) { /* up */
+			self->keyflags |= SPR16_KEYMOD_LALT;
+		}
+		break;
+	case SPR16_KEYCODE_LCTRL:
+		if (msg->val == 0) { /* down */
+			if (self->keyflags & SPR16_KEYMOD_LCTRL)
+				self->keyflags &= ~SPR16_KEYMOD_LCTRL;
+		}
+		else if (msg->val == 1) { /* up */
+			self->keyflags |= SPR16_KEYMOD_LCTRL;
+		}
+		break;
+
+	default:
+		break;
+	}
+	return 0;
+}
+
+
 /* TODO SYN_DROPPED!! also hardware repeats are getting ignored by Xorg
  * also, we probably want to EVIOCGRAB, is that essentially locking the device?
  * */
@@ -262,9 +334,6 @@ interrupted:
 		printf("read input: %s\n", STRERR);
 		return -1;
 	}
-	if (client == -1)
-		return 0; /* TODO this is prolly wrong, we should continue to check
-			     for SYN_DROPPED and change state if needed */
 	if (r < (int)sizeof(struct input_event)
 			|| r % (int)sizeof(struct input_event)) {
 		return -1;
@@ -291,6 +360,9 @@ interrupted:
 			if (evdev_translate_keycode(self, &data)) {
 				continue;
 			}
+			if (preempt_keycodes(self, &data))
+				continue;
+
 		break;
 		case EV_REL:
 			data.type = SPR16_INPUT_AXIS_RELATIVE;
@@ -300,6 +372,10 @@ interrupted:
 		default:
 			continue;
 		}
+
+		if (client == -1)
+			return 0; /* TODO this is prolly wrong, we should continue to check
+				     for SYN_DROPPED and change state if needed */
 		if (spr16_write_msg(client, &hdr, &data, sizeof(data))) {
 			return (errno == EAGAIN) ? 0 : -1;
 		}

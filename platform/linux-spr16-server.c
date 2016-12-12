@@ -182,8 +182,10 @@ int spr16_server_servinfo(int fd)
 	data.width  = g_width;
 	data.height = g_height;
 	data.bpp    = g_bpp;
+again:
 	if (spr16_write_msg(fd, &hdr, &data, sizeof(data))) {
-		printf("spr16_servinfo write_msg: %s\n", STRERR);
+		if (errno == EAGAIN)
+			goto again;
 		return -1;
 	}
 	return 0;
@@ -337,27 +339,12 @@ static int flush_all_devices()
 	return ret;
 }
 
-static int send_notice(int client, unsigned int notice)
-{
-	struct spr16_msgdata_input data;
-	struct spr16_msghdr hdr;
-	memset(&data, 0, sizeof(data));
-	memset(&hdr, 0, sizeof(hdr));
-	hdr.type = SPRITEMSG_INPUT;
-	data.type = SPR16_INPUT_NOTICE;
-	data.code = notice;
-	if (client == -1)
-		return 0;
-again:
-	if (spr16_write_msg(client, &hdr, &data, sizeof(data))) {
-		if (errno == EAGAIN)
-			goto again;
-		return -1;
-	}
-	return 0;
-}
 /*
  *  find the input fd and translate events,
+ *
+ *  -1 error
+ *  0 not an input event
+ *  1 was an input event
  */
 static int input_event(int evfd)
 {
@@ -369,13 +356,10 @@ static int input_event(int evfd)
 	}
 	cl_fd = g_focused_client ? g_focused_client->socket : -1;
 
-
 	if (g_unmute_input) {
 		g_unmute_input = 0;
 		g_mute_input = 0;
 		if (flush_all_devices())
-			return -1;
-		if (send_notice(cl_fd, SPR16_NOTICE_INPUT_FLUSH))
 			return -1;
 	}
 
@@ -389,6 +373,11 @@ static int input_event(int evfd)
 			}
 			else {
 				if (device->func_read(device, cl_fd)) {
+					if (errno == EPIPE) {
+						/* client pipe broke */
+						spr16_server_removeclient(cl_fd);
+						return 1;
+					}
 					return -1;
 				}
 			}
@@ -415,7 +404,10 @@ static int spr16_accept_connection(struct epoll_event *ev)
 		memset(&addr, 0, sizeof(addr));
 		newsock = accept4(ev->data.fd, (struct sockaddr *)&addr,
 				&addrlen, SOCK_NONBLOCK|SOCK_CLOEXEC);
-		printf("got new socket: %d\n", newsock);
+		if (newsock == -1) {
+			printf("accept4: %s\n", STRERR);
+			return -1;
+		}
 		/* TODO we should rate limit this per uid, and timeout drop,
 		 * also add a handshake timeout */
 		if (spr16_server_addclient(newsock)) {
@@ -492,6 +484,7 @@ int spr16_server_sync(struct spr16_msgdata_sync *region)
 
 	cl = g_dispatch_client;
 	if (cl == NULL) {
+		printf("null dispatch?\n");
 		return -1;
 	}
 	if (!g_state.sfb || !g_state.sfb->addr || !cl->sprite.shmem.addr) {
@@ -530,11 +523,12 @@ int spr16_server_update(int listen_fd)
 	for (i = 0; i < evcount; ++i)
 	{
 		int evfd = events[i].data.fd;
-		int r = input_event(evfd); 
+		int r = input_event(evfd);
 		if (r == 1) { /* input event */
 			continue;
 		}
 		else if (r == -1) { /* input error */
+			printf("input error\n");
 			return -1;
 		}
 		else if (evfd == listen_fd) { /* new client connecting */

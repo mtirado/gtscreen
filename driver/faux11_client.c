@@ -95,7 +95,7 @@ int handle_servinfo_connect(struct spr16_msgdata_servinfo *sinfo)
 		return -1;
 	}
 	if (spr16_client_handshake_start(name, g_width, g_height)) {
-		fprintf(stderr, "handshake failed\n");
+		fprintf(stderr, "handshake_start failed\n");
 		return -1;
 	}
 	return 0;
@@ -123,6 +123,7 @@ static DeviceIntPtr find_keyboard()
 int handle_input(struct spr16_msgdata_input *input)
 {
 	InputInfoPtr pInfo;
+	int r;
 
 	if (g_inputdev == NULL) {
 		g_inputdev = find_keyboard();
@@ -134,11 +135,15 @@ int handle_input(struct spr16_msgdata_input *input)
 		}
 	}
 	pInfo = g_inputdev->public.devicePrivate;
-	while (write((int)pInfo->private, input,
-				sizeof(*input)) == -1 && errno == EAGAIN) {
-		;
+again:
+	r = write((int)pInfo->private, input, sizeof(*input));
+	if (r == -1) {
+		if (errno == EAGAIN || errno == EINTR) {
+			usleep(2000);
+			goto again;
+		}
+		return -1;
 	}
-
 	return 0;
 }
 

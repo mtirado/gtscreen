@@ -205,7 +205,6 @@ int spr16_client_handshake_start(char *name, uint16_t width, uint16_t height)
 	data.bpp = bpp;
 	snprintf(data.name, SPRITE_MAXNAME, "%s", name);
 	if (spr16_write_msg(g_socket, &hdr, &data, sizeof(data))) {
-		fprintf(stderr, "spr16_servinfo write_msg: %s\n", STRERR);
 		return -1;
 	}
 	g_sprite.bpp = bpp;
@@ -303,7 +302,6 @@ int spr16_client_sync(uint16_t x, uint16_t y, uint16_t width, uint16_t height)
 	data.width = width;
 	data.height = height;
 	if (spr16_write_msg(g_socket, &hdr, &data, sizeof(data))) {
-		/*fprintf(stderr, "spr16_servinfo write_msg : %s\n", STRERR);*/
 		return -1;
 	}
 	return 0;

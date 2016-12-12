@@ -225,34 +225,23 @@ static void fx11_ascii_mode(InputInfoPtr info, struct spr16_msgdata_input *msg)
 	}
 }
 
-static void reset_modifiers(InputInfoPtr info)
+/* TODO user defined acceleration, and scroll wheel */
+static void axis_relative_accumulate(struct spr16_msgdata_input *msg)
 {
-	struct spr16_msgdata_input in;
-	uint32_t k_c;
-	memset(&in, 0, sizeof(in));
-	/* this is a bit of a hack, i'm sorry. vt switching causes key up event
-	 * without initial key down, these artificial key ups seem to help out. */
-	in.code = SPR16_KEYCODE_LSHIFT;
-	k_c = spr16_to_x11(info->dev, &in);
-	xf86PostKeyboardEvent(info->dev, k_c, 0);
-	in.code = SPR16_KEYCODE_LALT;
-	k_c = spr16_to_x11(info->dev, &in);
-	xf86PostKeyboardEvent(info->dev, k_c, 0);
-	in.code = SPR16_KEYCODE_LCTRL;
-	k_c = spr16_to_x11(info->dev, &in);
-	xf86PostKeyboardEvent(info->dev, k_c, 0);
-}
-
-static void axis_relative(struct spr16_msgdata_input *msg)
-{
-	valuator_mask_zero(g_cursor);
+	int val;
 	if (msg->code == REL_X) {
-		valuator_mask_set(g_cursor, REL_X, msg->val);
+		val = valuator_mask_get(g_cursor, REL_X) + msg->val;
+		valuator_mask_set(g_cursor, REL_X, val);
 	}
 	else if (msg->code == REL_Y) {
-		valuator_mask_set(g_cursor, REL_Y, msg->val);
+		val = valuator_mask_get(g_cursor, REL_Y) + msg->val;
+		valuator_mask_set(g_cursor, REL_Y, val);
 	}
-	/* TODO scroll wheel */
+}
+static void axis_relative_post(InputInfoPtr info)
+{
+	xf86PostMotionEventM(info->dev, Relative, g_cursor);
+	valuator_mask_zero(g_cursor);
 }
 
 static void key_event(InputInfoPtr info, struct spr16_msgdata_input *msg)
@@ -267,42 +256,39 @@ static void key_event(InputInfoPtr info, struct spr16_msgdata_input *msg)
 				k_c = 1;
 				break;
 			case SPR16_KEYCODE_RBTN:
-				k_c = 2;
+				k_c = 3; /* xorg right is 3 */
 				break;
-			case SPR16_KEYCODE_ABTN:
+			default:
+				k_c = 2; /* xorg middle is 2 */
+				break;
+			/*case SPR16_KEYCODE_ABTN:
 				k_c = 3;
-				break;
+				break;*/
 				/* from evdev driver:
 				 *  BTN_SIDE ... BTN_JOYSTICK  =  8 + code - BTN_SIDE
 				 *  BTN_0 ... BTN_2 = 1 + code - BTN_0
 				 *  BTN_3 ... BTN_MOUSE - 1 = 8 + code - BTN_3
 				 *
 				 */
-			default:
-				return;
 		}
-		fprintf(stderr, "button: %d\n", k_c);
-		xf86PostButtonEvent(info->dev, Relative, k_c, msg->val == 1, 0, 0);
+		xf86PostButtonEvent(info->dev, Relative, k_c, (msg->val == 1), 0, 0);
 		return;
 	}
 
 	k_c = spr16_to_x11(info->dev, msg);
-	if (msg->val == 0) {
-		xf86PostKeyboardEvent(info->dev, k_c, 0);
+	if (msg->val == 0 || msg->val == 1) {
+		xf86PostKeyboardEvent(info->dev, k_c, msg->val);
 	}
-	else if (msg->val == 1) {
-		xf86PostKeyboardEvent(info->dev, k_c, 1);
-	}
-	else if (msg->val == 2) {
+	else if (msg->val == 2) { /* force a repeat */
 		xf86PostKeyboardEvent(info->dev, k_c, 0);
 		xf86PostKeyboardEvent(info->dev, k_c, 1);
-		/* repeat */
 	}
 }
 
 static void fx11ReadInput(InputInfoPtr pInfo)
 {
 	struct spr16_msgdata_input msgs[1024];
+	int post_relative = 0;
 	int bytes;
 	unsigned int i;
 intr:
@@ -320,13 +306,8 @@ intr:
 		switch (msgs[i].type)
 		{
 		case SPR16_INPUT_AXIS_RELATIVE:
-			axis_relative(&msgs[i]);
-			/* should we accumulate and wait for syn? */
-			xf86PostMotionEventM(pInfo->dev, Relative, g_cursor);
-			break;
-		case SPR16_INPUT_NOTICE:
-			if (msgs[i].code == SPR16_NOTICE_INPUT_FLUSH)
-				reset_modifiers(pInfo); /* vt change */
+			axis_relative_accumulate(&msgs[i]);
+			post_relative = 1;
 			break;
 		case SPR16_INPUT_KEY:
 			key_event(pInfo, &msgs[i]);
@@ -339,6 +320,8 @@ intr:
 			break;
 		}
 	}
+	if (post_relative)
+		axis_relative_post(pInfo);
 	return;
 }
 
