@@ -22,8 +22,7 @@
 
 struct spr16_msgdata_servinfo g_servinfo;
 DeviceIntPtr g_inputdev;
-#define STKSIZE (256*1024)
-char *g_clonestack;
+int g_input_write;
 
 void faux11_init()
 {
@@ -35,7 +34,6 @@ void faux11_init()
 	}
 	memset(&g_servinfo, 0, sizeof(g_servinfo));
 	g_inputdev = NULL;
-	g_clonestack = NULL;
 }
 
 int handle_servinfo(struct spr16_msgdata_servinfo *sinfo)
@@ -101,45 +99,15 @@ int handle_servinfo_connect(struct spr16_msgdata_servinfo *sinfo)
 	return 0;
 }
 
-static DeviceIntPtr find_keyboard()
-{
-	const char kfind[] = "faux11input";
-	InputInfoPtr pInfo;
-	DeviceIntPtr dev = inputInfo.devices;
-	for ( ; dev; dev = dev->next)
-	{
-		pInfo = dev->public.devicePrivate;
-		if (!pInfo) {
-			continue;
-		}
-		if (strcmp(kfind, pInfo->type_name) == 0) {
-			fprintf(stderr, "kbd name: %s\n", dev->name);
-			return dev;
-		}
-	}
-	return NULL;
-}
-
 int handle_input(struct spr16_msgdata_input *input)
 {
-	InputInfoPtr pInfo;
 	int r;
 
-	if (g_inputdev == NULL) {
-		g_inputdev = find_keyboard();
-		if (g_inputdev == NULL) {
-			fprintf(stderr, "no keyboard device found\n");
-			return 0; /*	this could fail, race until input driver loads
-					remove input driver completely if possible
-					or just deal with this. */
-		}
-	}
-	pInfo = g_inputdev->public.devicePrivate;
 again:
-	r = write((int)pInfo->private, input, sizeof(*input));
+	r = write(g_input_write, input, sizeof(*input));
 	if (r == -1) {
 		if (errno == EAGAIN || errno == EINTR) {
-			usleep(2000);
+			usleep(1000);
 			goto again;
 		}
 		return -1;
@@ -167,14 +135,15 @@ struct spr16 *spr16_connect(char *srv_socket, uint16_t width, uint16_t height)
 	return spr16_client_get_sprite();
 }
 
-int client_main(pid_t xpid)
+void client_main(pid_t xpid, int input_write)
 {
-	int r = 0;
 	/* kill client when xorg exits. */
 	prctl(PR_SET_PDEATHSIG, SIGKILL);
+	g_input_write = input_write;
+
 	while (1)
 	{
-		r = spr16_client_update(-1);
+		int r = spr16_client_update(-1);
 		if (r == -1) {
 			fprintf(stderr, "spr16 update error\n");
 			break;
@@ -185,35 +154,21 @@ int client_main(pid_t xpid)
 	kill(xpid, SIGTERM);
 	usleep(1000000);
 	kill(xpid, SIGKILL);
-	return r;
 }
 
-int clone_func(void *v)
+int fork_client(int input_write)
 {
-	pid_t xpid = *(pid_t *)v;
-	_exit(client_main(xpid));
-}
-
-int fork_client()
-{
-	char *topstack;
 	pid_t p, xpid;
 
 	xpid = getpid();
-	if (g_clonestack == NULL) {
-		g_clonestack = malloc(STKSIZE);
-		if (g_clonestack == NULL) {
-			return -1;
-		}
+	p = fork();
+	if (p == 0) {
+		client_main(xpid, input_write);
+		_exit(-1);
 	}
-	else {
-		fprintf(stderr, "stack already allocated?\n");
-		return 0;
-	}
-	topstack = g_clonestack + STKSIZE;
-	p = clone(clone_func, topstack, CLONE_VM|CLONE_FILES|SIGCHLD, &xpid);
-	if (p == -1) {
+	else if (p == -1) {
 		fprintf(stderr, "fork: %s\n", STRERR);
+		_exit(-1);
 	}
 	return 0;
 }

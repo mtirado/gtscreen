@@ -331,7 +331,7 @@ interrupted:
 		else if (errno == EINTR) {
 			goto interrupted;
 		}
-		printf("read input: %s\n", STRERR);
+		fprintf(stderr, "read input: %s\n", STRERR);
 		return -1;
 	}
 	if (r < (int)sizeof(struct input_event)

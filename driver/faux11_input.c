@@ -443,36 +443,24 @@ static void xf86VoidUninit(InputDriverPtr drv, InputInfoPtr pInfo, int flags)
  */
 static int xf86VoidInit(InputDriverPtr drv, InputInfoPtr pInfo,	int flags)
 {
-	int ipc[2];
-	int pipeflags;
+	int input_read_fd = -1;
+	char *fdnum;
+	char *err = NULL;
 
+	fdnum = getenv("FAUX_INPUT_READ");
+	if (fdnum == NULL) {
+		fprintf(stderr, "couldn't locate input descriptor\n");
+		return -1;
+	}
+	errno = 0;
+	input_read_fd = strtol(fdnum, &err, 10);
+	if (err == NULL || *err || errno || input_read_fd < 0) {
+		fprintf(stderr, "errnoenous input fdnum\n");
+		return -1;
+	}
 	fprintf(stderr, "--------------------------------------------------\n");
 	fprintf(stderr, "- faux11 input init ------------------------------\n");
 	fprintf(stderr, "--------------------------------------------------\n");
-
-	if (pipe2(ipc, O_CLOEXEC|O_NONBLOCK|O_DIRECT)) {
-		fprintf(stderr, "pipe: %s\n", STRERR);
-		return -1;
-	}
-	/* set async to generate SIGIO (for read_input to trigger) */
-	pipeflags = fcntl(ipc[0], F_GETFL, 0);
-	if (pipeflags == -1) {
-		fprintf(stderr, "fcntl: %s\n", STRERR);
-		return -1;
-	}
-	if (fcntl(ipc[0], F_SETFL, pipeflags|O_ASYNC)) {
-		fprintf(stderr, "fcntl: %s\n", STRERR);
-		return -1;
-	}
-	pipeflags = fcntl(ipc[1], F_GETFL, 0);
-	if (pipeflags == -1) {
-		fprintf(stderr, "fcntl: %s\n", STRERR);
-		return -1;
-	}
-	if (fcntl(ipc[1], F_SETFL, pipeflags|O_ASYNC)) {
-		fprintf(stderr, "fcntl: %s\n", STRERR);
-		return -1;
-	}
 
 	/* Initialise the InputInfoRec. */
 	pInfo->type_name = "faux11input";
@@ -480,8 +468,7 @@ static int xf86VoidInit(InputDriverPtr drv, InputInfoPtr pInfo,	int flags)
 	pInfo->read_input = fx11ReadInput;
 	pInfo->control_proc = NULL;
 	pInfo->switch_mode = NULL;
-	pInfo->fd = ipc[0]; /* read end */
-	pInfo->private = (void *)ipc[1]; /* write end for gfx driver, such hacks! */
+	pInfo->fd = input_read_fd; /* read end (needs O_ASYNC) */
 
 	/* cursor */
 	g_cursor = valuator_mask_new(CURSOR_AXES);

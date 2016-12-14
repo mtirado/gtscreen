@@ -35,6 +35,7 @@
  * removed all of the DRM functionality and converted to a spr16 client.
  */
 
+#define _GNU_SOURCE
 #include <unistd.h>
 #include <fcntl.h>
 
@@ -60,6 +61,8 @@
 #include "faux11-compat-api.h"
 #include "faux11.h"
 #include "../protocol/spr16.h"
+
+#define STRERR strerror(errno)
 
 static void AdjustFrame(ADJUST_FRAME_ARGS_DECL);
 static Bool CloseScreen(CLOSE_SCREEN_ARGS_DECL);
@@ -271,15 +274,13 @@ static void dispatch_dirty(ScreenPtr pScreen)
 					rect->y1,
 					rect->x2 - rect->x1,
 					rect->y2 - rect->y1)) {
-
 			if (errno != EAGAIN) {
 				fprintf(stderr,"spr16 sync error: %s\n",strerror(errno));
 				_exit(-1);
 				break;
 			}
 			else {
-				/* don't keep spinning on EAGAIN! */
-				usleep(10000);
+				usleep(1000);
 			}
 		}
 	}
@@ -509,15 +510,49 @@ static Bool SaveScreen(ScreenPtr pScreen, int mode)
     return TRUE;
 }
 
+static int create_input_descriptors(int *ipc)
+{
+	char buf[32];
+	int pipeflags;
+	if (pipe2(ipc, O_CLOEXEC|O_NONBLOCK|O_DIRECT)) {
+		fprintf(stderr, "pipe: %s\n", STRERR);
+		return -1;
+	}
+	/* set async to generate SIGIO (for read_input to trigger) */
+	pipeflags = fcntl(ipc[0], F_GETFL, 0);
+	if (pipeflags == -1) {
+		fprintf(stderr, "fcntl: %s\n", STRERR);
+		return -1;
+	}
+	if (fcntl(ipc[0], F_SETFL, pipeflags|O_ASYNC)) {
+		fprintf(stderr, "fcntl: %s\n", STRERR);
+		return -1;
+	}
+	if (fcntl(ipc[1], F_SETFL, pipeflags|O_ASYNC)) {
+		fprintf(stderr, "fcntl: %s\n", STRERR);
+		return -1;
+	}
+	snprintf(buf, sizeof(buf), "%d", ipc[0]);
+	if (setenv("FAUX_INPUT_READ", buf, 1)) {
+		fprintf(stderr, "setenv: %s\n", STRERR);
+		return -1;
+	}
+	return 0;
+}
+
 static Bool ScreenInit(SCREEN_INIT_ARGS_DECL)
 {
 	ScrnInfoPtr pScrn = xf86ScreenToScrn(pScreen);
 	faux11Ptr fx11 = faux11PTR(pScrn);
 	VisualPtr visual;
 	struct spr16 *sprite;
+	int ipc[2];
 
 	pScrn->pScreen = pScreen;
 
+	fprintf(stderr, "---- faux11 screen init ---------------------------\n");
+	if (create_input_descriptors(ipc))
+		return -1;
 	/*pScrn->displayWidth = pScrn->virtualX - 24;*/
 	/* TODO check modes against servinfo! then allocate exactly enough "vram"
 	 * rename variable form maxvram, maybe allocate a little extra to pad for
@@ -532,7 +567,7 @@ static Bool ScreenInit(SCREEN_INIT_ARGS_DECL)
 		return FALSE;
 	}
 	fx11->FBBase = (pointer *)sprite->shmem.addr;
-	if (fork_client()) {
+	if (fork_client(ipc[1])) {
 		fprintf(stderr, "unable to start spr16 client\n");
 		return FALSE;
 	}
