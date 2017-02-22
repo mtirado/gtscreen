@@ -30,13 +30,13 @@
  * This file was originally driver.h from xf86-video-modesetting driver.
  */
 
-#include "faux11-compat-api.h"
+#include "sporg-compat-api.h"
 #include <errno.h>
 #include <damage.h>
 
-#include "../protocol/spr16.h"
+#include "../../../protocol/spr16.h"
 
-/* faux11_client interface */
+/* sporg_client interface */
 struct spr16_msgdata_servinfo get_servinfo(char *srv_socket);
 struct spr16 *spr16_connect(char *srv_socket, uint16_t width, uint16_t height);
 int fork_client();
@@ -65,7 +65,7 @@ typedef struct
     ScrnInfoPtr pScrn_2;
 } EntRec, *EntPtr;
 
-typedef struct _faux11Rec
+typedef struct _sporgRec
 {
     int fd;
 
@@ -93,6 +93,6 @@ typedef struct _faux11Rec
     dummy_colors colors[256];
     pointer* FBBase;
 
-} faux11Rec, *faux11Ptr;
+} sporgRec, *sporgPtr;
 
-#define faux11PTR(p) ((faux11Ptr)((p)->driverPrivate))
+#define sporgPTR(p) ((sporgPtr)((p)->driverPrivate))

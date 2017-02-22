@@ -58,9 +58,9 @@
 #include "xf86xv.h"
 #include <X11/extensions/Xv.h>
 
-#include "faux11-compat-api.h"
-#include "faux11.h"
-#include "../protocol/spr16.h"
+#include "sporg-compat-api.h"
+#include "sporg.h"
+#include "../../../protocol/spr16.h"
 
 #define STRERR strerror(errno)
 
@@ -77,7 +77,7 @@ static Bool SwitchMode(SWITCH_MODE_ARGS_DECL);
 static Bool ScreenInit(SCREEN_INIT_ARGS_DECL);
 static Bool PreInit(ScrnInfoPtr pScrn, int flags);
 static Bool Probe(DriverPtr drv, int flags);
-static Bool fx11_driver_func(ScrnInfoPtr scrn, xorgDriverFuncOp op, void *data);
+static Bool sporg_driver_func(ScrnInfoPtr scrn, xorgDriverFuncOp op, void *data);
 
 
 struct spr16_msgdata_servinfo g_servinfo;
@@ -88,15 +88,15 @@ enum {
 	FAUX_CHIPSET=0
 };
 
-_X_EXPORT DriverRec faux11 = {
+_X_EXPORT DriverRec sporg = {
 	1,
-	"faux11",
+	"sporg",
 	Identify,
 	Probe,
 	AvailableOptions,
 	NULL,
 	0,
-	fx11_driver_func,
+	sporg_driver_func,
 };
 
 static SymTabRec Chipsets[] = {
@@ -108,7 +108,7 @@ typedef enum
 {
 	OPTION_SW_CURSOR,
 	OPTION_DEVICE_PATH,
-} faux11Opts;
+} sporgOpts;
 
 static const OptionInfoRec Options[] = {
 	{OPTION_SW_CURSOR, "SWcursor", OPTV_BOOLEAN, {0}, FALSE},
@@ -116,12 +116,12 @@ static const OptionInfoRec Options[] = {
 	{-1, NULL, OPTV_NONE, {0}, FALSE}
 };
 
-int faux11EntityIndex = -1;
+int sporgEntityIndex = -1;
 
 static MODULESETUPPROTO(Setup);
 
 static XF86ModuleVersionInfo VersRec = {
-	"faux11",
+	"sporg",
 	MODULEVENDORSTRING,
 	MODINFOSTRING1,
 	MODINFOSTRING2,
@@ -133,7 +133,7 @@ static XF86ModuleVersionInfo VersRec = {
 	{0, 0, 0, 0}
 };
 
-_X_EXPORT XF86ModuleData faux11ModuleData = { &VersRec, Setup, NULL };
+_X_EXPORT XF86ModuleData sporgModuleData = { &VersRec, Setup, NULL };
 
 
 static pointer Setup(pointer module, pointer opts, int *errmaj, int *errmin)
@@ -145,7 +145,7 @@ static pointer Setup(pointer module, pointer opts, int *errmaj, int *errmin)
 	if (!setupDone) {
 		setupDone = 1;
 		g_maxvram = 0;
-		xf86AddDriver(&faux11, module, HaveDriverFuncs);
+		xf86AddDriver(&sporg, module, HaveDriverFuncs);
 
 		/*
 		 * The return value must be non-NULL on success even though there
@@ -161,11 +161,11 @@ static pointer Setup(pointer module, pointer opts, int *errmaj, int *errmin)
 
 static void Identify(int flags)
 {
-	xf86PrintChipsets("faux11", "Fake driver alternative display server",
+	xf86PrintChipsets("sporg", "Fake driver alternative display server",
 			Chipsets);
 }
 
-static Bool fx11_driver_func(ScrnInfoPtr scrn, xorgDriverFuncOp op, void *data)
+static Bool sporg_driver_func(ScrnInfoPtr scrn, xorgDriverFuncOp op, void *data)
 {
 	xorgHWFlags *flags;
 	switch (op)
@@ -194,7 +194,7 @@ static Bool Probe(DriverPtr drv, int flags)
 	Bool foundScreen = FALSE;
 	ScrnInfoPtr scrn = NULL;
 	struct spr16_msgdata_servinfo sinfo;
-	fprintf(stderr, "-- faux11 gfx probe --\n");
+	fprintf(stderr, "-- sporg gfx probe --\n");
 
 	if (g_maxvram)
 		return FALSE;
@@ -207,7 +207,7 @@ static Bool Probe(DriverPtr drv, int flags)
 	 * Find the config file Device sections that match this
 	 * driver, and return if there are none.
 	 */
-	if ((numDevSections = xf86MatchDevice("faux11", &devSections)) <= 0) {
+	if ((numDevSections = xf86MatchDevice("sporg", &devSections)) <= 0) {
 		return FALSE;
 	}
 	sinfo = get_servinfo("tty1"); /* XXX -- don't hardcode tty1 */
@@ -231,8 +231,8 @@ static Bool Probe(DriverPtr drv, int flags)
 			/* TODO clean up version / name assignment */
 			foundScreen = TRUE;
 			scrn->driverVersion = PACKAGE_VERSION_MAJOR;
-			scrn->driverName = "faux11";
-			scrn->name = "faux11";
+			scrn->driverName = "sporg";
+			scrn->name = "sporg";
 			scrn->Probe = Probe;
 			scrn->PreInit = PreInit;
 			scrn->ScreenInit = ScreenInit;
@@ -257,7 +257,7 @@ static Bool GetRec(ScrnInfoPtr pScrn)
 	if (pScrn->driverPrivate)
 		return TRUE;
 
-	pScrn->driverPrivate = xnfcalloc(sizeof(faux11Rec), 1);
+	pScrn->driverPrivate = xnfcalloc(sizeof(sporgRec), 1);
 
 	return TRUE;
 }
@@ -265,8 +265,8 @@ static Bool GetRec(ScrnInfoPtr pScrn)
 static void dispatch_dirty(ScreenPtr pScreen)
 {
 	ScrnInfoPtr scrn = xf86ScreenToScrn(pScreen);
-	faux11Ptr fx11 = faux11PTR(scrn);
-	RegionPtr dirty = DamageRegion(fx11->damage);
+	sporgPtr sporg = sporgPTR(scrn);
+	RegionPtr dirty = DamageRegion(sporg->damage);
 	unsigned num_cliprects = REGION_NUM_RECTS(dirty);
 	BoxPtr rect = REGION_RECTS(dirty);
 	for (unsigned i = 0; i < num_cliprects; i++, rect++) {
@@ -284,34 +284,34 @@ static void dispatch_dirty(ScreenPtr pScreen)
 			}
 		}
 	}
-	DamageEmpty(fx11->damage);
+	DamageEmpty(sporg->damage);
 }
 
-static void fx11BlockHandler(BLOCKHANDLER_ARGS_DECL)
+static void sporgBlockHandler(BLOCKHANDLER_ARGS_DECL)
 {
 	SCREEN_PTR(arg);
-	faux11Ptr fx11 = faux11PTR(xf86ScreenToScrn(pScreen));
-	pScreen->BlockHandler = fx11->BlockHandler;
+	sporgPtr sporg = sporgPTR(xf86ScreenToScrn(pScreen));
+	pScreen->BlockHandler = sporg->BlockHandler;
 	pScreen->BlockHandler(BLOCKHANDLER_ARGS);
-	pScreen->BlockHandler = fx11BlockHandler;
-	if (fx11->dirty_enabled)
+	pScreen->BlockHandler = sporgBlockHandler;
+	if (sporg->dirty_enabled)
 		dispatch_dirty(pScreen);
 }
 
 static void FreeRec(ScrnInfoPtr pScrn)
 {
-	faux11Ptr fx11;
+	sporgPtr sporg;
 
 	if (!pScrn)
 		return;
 
-	fx11 = faux11PTR(pScrn);
-	if (!fx11)
+	sporg = sporgPTR(pScrn);
+	if (!sporg)
 		return;
 	pScrn->driverPrivate = NULL;
 
-	free(fx11->Options);
-	free(fx11);
+	free(sporg->Options);
+	free(sporg);
 
 }
 
@@ -380,7 +380,7 @@ static int init_faux_hw(ScrnInfoPtr pScrn)
 
 static Bool PreInit(ScrnInfoPtr pScrn, int flags)
 {
-	faux11Ptr fx11;
+	sporgPtr sporg;
 	EntityInfoPtr pEnt;
 
 	if (pScrn->numEntities != 1)
@@ -395,10 +395,10 @@ static Bool PreInit(ScrnInfoPtr pScrn, int flags)
 	if (!GetRec(pScrn))
 		return FALSE;
 
-	fx11 = faux11PTR(pScrn);
-	fx11->SaveGeneration = -1;
-	fx11->pEnt = pEnt;
-	fx11->entityPrivate = NULL;
+	sporg = sporgPTR(pScrn);
+	sporg->SaveGeneration = -1;
+	sporg->pEnt = pEnt;
+	sporg->entityPrivate = NULL;
 
 	pScrn->monitor = pScrn->confScreen->monitor;
 	pScrn->progClock = TRUE;
@@ -422,10 +422,10 @@ static Bool PreInit(ScrnInfoPtr pScrn, int flags)
 
 	/* Process the options */
 	xf86CollectOptions(pScrn, NULL);
-	if (!(fx11->Options = malloc(sizeof(Options))))
+	if (!(sporg->Options = malloc(sizeof(Options))))
 		return FALSE;
-	memcpy(fx11->Options, Options, sizeof(Options));
-	xf86ProcessOptions(pScrn->scrnIndex, pScrn->options, fx11->Options);
+	memcpy(sporg->Options, Options, sizeof(Options));
+	xf86ProcessOptions(pScrn->scrnIndex, pScrn->options, sporg->Options);
 	/*if (!xf86SetWeight(pScrn, defaultWeight, defaultWeight))
 	  return FALSE;*/
 	/* if depth > 8? */
@@ -437,12 +437,12 @@ static Bool PreInit(ScrnInfoPtr pScrn, int flags)
 	/*if (!xf86SetDefaultVisual(pScrn, -1))
 		return FALSE;*/
 
-	/*if (xf86ReturnOptValBool(fx11->Options, OPTION_SW_CURSOR, FALSE)) {
-	  fx11->drmmode.sw_cursor = TRUE;
+	/*if (xf86ReturnOptValBool(sporg->Options, OPTION_SW_CURSOR, FALSE)) {
+	  sporg->drmmode.sw_cursor = TRUE;
 	  }*/
 
-	fx11->cursor_width = 64;
-	fx11->cursor_height = 64;
+	sporg->cursor_width = 64;
+	sporg->cursor_height = 64;
 
 	{
 		Gamma zeros = { 0.0, 0.0, 0.0 };
@@ -474,15 +474,15 @@ static Bool PreInit(ScrnInfoPtr pScrn, int flags)
 static Bool CreateScreenResources(ScreenPtr pScreen)
 {
 	ScrnInfoPtr pScrn = xf86ScreenToScrn(pScreen);
-	faux11Ptr fx11 = faux11PTR(pScrn);
+	sporgPtr sporg = sporgPTR(pScrn);
 	PixmapPtr rootPixmap;
 	Bool ret;
 	void *pixels;
-	pScreen->CreateScreenResources = fx11->createScreenResources;
+	pScreen->CreateScreenResources = sporg->createScreenResources;
 	ret = pScreen->CreateScreenResources(pScreen);
 	pScreen->CreateScreenResources = CreateScreenResources;
 
-	pixels = fx11->FBBase;
+	pixels = sporg->FBBase;
 	if (!pixels)
 		return FALSE;
 
@@ -490,12 +490,12 @@ static Bool CreateScreenResources(ScreenPtr pScreen)
 	if (!pScreen->ModifyPixmapHeader(rootPixmap, -1, -1, -1, -1, -1, pixels))
 		FatalError("Couldn't adjust screen pixmap\n");
 
-	fx11->damage = DamageCreate(NULL, NULL, DamageReportNone, TRUE,
+	sporg->damage = DamageCreate(NULL, NULL, DamageReportNone, TRUE,
 			pScreen, rootPixmap);
 
-	if (fx11->damage) {
-		DamageRegister(&rootPixmap->drawable, fx11->damage);
-		fx11->dirty_enabled = TRUE;
+	if (sporg->damage) {
+		DamageRegister(&rootPixmap->drawable, sporg->damage);
+		sporg->dirty_enabled = TRUE;
 		xf86DrvMsg(pScrn->scrnIndex, X_INFO, "Damage tracking initialized\n");
 	} else {
 		xf86DrvMsg(pScrn->scrnIndex, X_ERROR,
@@ -533,7 +533,7 @@ static int create_input_descriptors(int *ipc)
 		return -1;
 	}
 	snprintf(buf, sizeof(buf), "%d", ipc[0]);
-	if (setenv("FAUX_INPUT_READ", buf, 1)) {
+	if (setenv("SPORG_INPUT_READ", buf, 1)) {
 		fprintf(stderr, "setenv: %s\n", STRERR);
 		return -1;
 	}
@@ -543,14 +543,14 @@ static int create_input_descriptors(int *ipc)
 static Bool ScreenInit(SCREEN_INIT_ARGS_DECL)
 {
 	ScrnInfoPtr pScrn = xf86ScreenToScrn(pScreen);
-	faux11Ptr fx11 = faux11PTR(pScrn);
+	sporgPtr sporg = sporgPTR(pScrn);
 	VisualPtr visual;
 	struct spr16 *sprite;
 	int ipc[2];
 
 	pScrn->pScreen = pScreen;
 
-	fprintf(stderr, "---- faux11 screen init ---------------------------\n");
+	fprintf(stderr, "---- sporg screen init ---------------------------\n");
 	if (create_input_descriptors(ipc))
 		return -1;
 	/*pScrn->displayWidth = pScrn->virtualX - 24;*/
@@ -566,7 +566,7 @@ static Bool ScreenInit(SCREEN_INIT_ARGS_DECL)
 		fprintf(stderr, "could not connect to spr16 display server\n");
 		return FALSE;
 	}
-	fx11->FBBase = (pointer *)sprite->shmem.addr;
+	sporg->FBBase = (pointer *)sprite->shmem.addr;
 	if (fork_client(ipc[1])) {
 		fprintf(stderr, "unable to start spr16 client\n");
 		return FALSE;
@@ -585,7 +585,7 @@ static Bool ScreenInit(SCREEN_INIT_ARGS_DECL)
 	pScrn->fbOffset = 0;
 
 	/* TODO variable size instead of using max */
-	if (!fbScreenInit(pScreen, fx11->FBBase,
+	if (!fbScreenInit(pScreen, sporg->FBBase,
 				g_servinfo.width, g_servinfo.height,
 				pScrn->xDpi, pScrn->yDpi,
 				pScrn->displayWidth, pScrn->bitsPerPixel))
@@ -608,7 +608,7 @@ static Bool ScreenInit(SCREEN_INIT_ARGS_DECL)
 
 	fbPictureInit(pScreen, NULL, 0);
 
-	fx11->createScreenResources = pScreen->CreateScreenResources;
+	sporg->createScreenResources = pScreen->CreateScreenResources;
 	pScreen->CreateScreenResources = CreateScreenResources;
 
 	xf86SetBlackWhitePixels(pScreen);
@@ -617,10 +617,10 @@ static Bool ScreenInit(SCREEN_INIT_ARGS_DECL)
 	miDCInitialize(pScreen, xf86GetPointerScreenFuncs());
 
 	pScreen->SaveScreen = SaveScreen;
-	fx11->CloseScreen = pScreen->CloseScreen;
+	sporg->CloseScreen = pScreen->CloseScreen;
 	pScreen->CloseScreen = CloseScreen;
-	fx11->BlockHandler = pScreen->BlockHandler;
-	pScreen->BlockHandler = fx11BlockHandler;
+	sporg->BlockHandler = pScreen->BlockHandler;
+	pScreen->BlockHandler = sporgBlockHandler;
 
 	if (!miCreateDefColormap(pScreen))
 		return FALSE;
@@ -656,22 +656,22 @@ static Bool SwitchMode(SWITCH_MODE_ARGS_DECL)
 static Bool CloseScreen(CLOSE_SCREEN_ARGS_DECL)
 {
 	ScrnInfoPtr pScrn = xf86ScreenToScrn(pScreen);
-	faux11Ptr fx11 = faux11PTR(pScrn);
+	sporgPtr sporg = sporgPTR(pScrn);
 
-	if (fx11->damage) {
+	if (sporg->damage) {
 #if XORG_VERSION_CURRENT < XORG_VERSION_NUMERIC(1,14,99,2,0)
 		DamageUnregister(&pScreen->GetScreenPixmap(pScreen)->drawable,
-				 fx11->damage);
+				 sporg->damage);
 #else
-		DamageUnregister(fx11->damage);
+		DamageUnregister(sporg->damage);
 #endif
-		DamageDestroy(fx11->damage);
-		fx11->damage = NULL;
+		DamageDestroy(sporg->damage);
+		sporg->damage = NULL;
 	}
 
-	pScreen->CreateScreenResources = fx11->createScreenResources;
-	pScreen->BlockHandler = fx11->BlockHandler;
-	pScreen->CloseScreen = fx11->CloseScreen;
+	pScreen->CreateScreenResources = sporg->createScreenResources;
+	pScreen->BlockHandler = sporg->BlockHandler;
+	pScreen->CloseScreen = sporg->CloseScreen;
 	return (*pScreen->CloseScreen) (CLOSE_SCREEN_ARGS);
 }
 

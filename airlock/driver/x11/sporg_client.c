@@ -11,7 +11,7 @@
 #include <signal.h>
 #include <sched.h>
 #include <sys/prctl.h>
-#include "../protocol/spr16.h"
+#include "../../../protocol/spr16.h"
 
 #include <X11/keysym.h>
 #include "xf86Xinput.h"
@@ -24,12 +24,13 @@ struct spr16_msgdata_servinfo g_servinfo;
 DeviceIntPtr g_inputdev;
 int g_input_write;
 
-void faux11_init()
+void sporg_init()
 {
 	if (geteuid() == 0 || getuid() == 0) {
 		/* TODO check for caps too */
-		fprintf(stderr, "YOU ARE ROOT, defeating the whole point ");
+		fprintf(stderr, "YOU ARE ROOT, defeating the entire purpose ");
 		fprintf(stderr, "of this driver. don't do that!");
+		/* TODO check env var if user wants to do this anyway */
 		_exit(-1);
 	}
 	memset(&g_servinfo, 0, sizeof(g_servinfo));
@@ -83,7 +84,7 @@ uint16_t g_width, g_height;
 int handle_servinfo_connect(struct spr16_msgdata_servinfo *sinfo)
 {
 	char name[SPRITE_MAXNAME];
-	snprintf(name, sizeof(name), "faux11-%d", getpid());
+	snprintf(name, sizeof(name), "sporg-%d", getpid());
 	if (g_servinfo.bpp != sinfo->bpp) {
 		fprintf(stderr, "bpp mismatch \n");
 		return -1;

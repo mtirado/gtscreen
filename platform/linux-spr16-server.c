@@ -32,6 +32,10 @@ extern struct drm_state g_state;
 extern void load_linux_input_drivers(struct input_device **device_list,
 		int epoll_fd, int stdin_mode, int evdev);
 
+/*extern void x86_sse2_xmmcpy_256(char *dest, char *src, unsigned int count);
+extern void x86_sse2_xmmcpy_512(char *dest, char *src, unsigned int count);
+extern void x86_sse2_xmmcpy_1024(char *dest, char *src, unsigned int count);(*/
+
 #define MAX_EPOLL 30
 #define MAX_ACCEPT 5
 
@@ -322,7 +326,6 @@ int spr16_server_init_input()
 	return 0;
 }
 
-
 static int flush_all_devices()
 {
 	struct input_device *device;
@@ -471,6 +474,10 @@ int spr16_server_sync(struct spr16_msgdata_sync *region)
 	const uint32_t weight = bpp/8;
 	struct client *cl;
 	uint16_t i;
+	uint32_t xoff;
+	uint32_t xadj;
+	uint32_t width;
+	uint32_t count;
 
 	/*
 	 * TODO some way to handle multiple displays, for now consider
@@ -488,24 +495,58 @@ int spr16_server_sync(struct spr16_msgdata_sync *region)
 		return -1;
 	}
 	if (!g_state.sfb || !g_state.sfb->addr || !cl->sprite.shmem.addr) {
-		printf("bad ptr %p \n", (void *)cl->sprite.shmem.addr);
+		printf("bad ptr\n");
 		return -1;
 	}
 
-	/* sync box regions TODO sse/neon/etc */
+	/* align sync rectangle to grid
+	 * 16/32 pixel blocks are always nicely aligned for 8, 16, 32 bpp
+	 * 32 pixel grid @ 32bpp = 128byte == full xmm line,
+	 *
+	 * but is no good @24bpp
+	 * fix whenever we get there, for now 24bpp will be left unsupported
+	 *
+	 */
+	xoff  = (region->x - (region->x % 16));
+	xadj  = region->x - xoff;
+	width = region->width + xadj;
+	if (width%16)
+		width = (width + (16 - width%16));
+
+	if (xoff+width > g_state.sfb->width) {
+		printf("client sent bad sync\n");
+		return -1;
+	}
+	/* convert to bytes */
+	width *= weight;
+	xoff  *= weight;
+	/* TODO apply these newly quantized syncs to a struct that optimizes
+	 * rectangle copy jobs for vblank period, don't forget that overly large
+	 * grid sizes do more harm than good on low-end hardware
+	 * one strategy may be to to keep 1:1 with optimal copy size or so
+	 * 32px xmm, 64px ymm, 128px zmm, @ 32bpp
+	 * TODO make sure sprite has correct alignment following mmap */
+#define BLKSZ 64
+	count = width/BLKSZ;
+	if (width%BLKSZ) {
+		printf("align: %d\n", width%BLKSZ);
+		return -1;
+	}
 	for (i = 0; i < region->height; ++i)
 	{
-		uint32_t xoff  = region->x * weight;
-		uint32_t svoff = (((region->y + i) * g_width) * weight)+xoff;
-		uint32_t cloff = (((region->y + i) * cl->sprite.width) * weight)+xoff;
-		memcpy(g_state.sfb->addr + svoff,
-		       cl->sprite.shmem.addr + cloff,
-		       region->width * weight);
+		const uint32_t svoff = (((region->y + i)*g_width)*weight)+xoff;
+		const uint32_t cloff = (((region->y + i)*cl->sprite.width)*weight)+xoff;
+		uint16_t z;
+		for (z = 0; z < count; ++z) {
+			memcpy((g_state.sfb->addr + svoff) + (z * BLKSZ),
+				(cl->sprite.shmem.addr + cloff) + (z * BLKSZ), BLKSZ);
+		}
+		/*x86_sse2_xmmcpy_256(g_state.sfb->addr + svoff,
+				    cl->sprite.shmem.addr + cloff,
+				    count);*/
 	}
 	return 0;
 }
-
-
 
 int spr16_server_update(int listen_fd)
 {

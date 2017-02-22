@@ -5,14 +5,15 @@
 DEFINES := -DMAX_SYSTEMPATH=1024 -DPTRBITCOUNT=32
 CFLAGS  := -pedantic -Wall -Wextra -Werror $(DEFINES)
 DEFLANG := -ansi
-DBG	:= -g
+
+#DBG	:= -g -march=core2 -mtune=core2
+# TODO benchmark sync
 
 #########################################
 # optional features
 #########################################
 
 
-#TODO strip debugging info
 #########################################
 # objects
 #########################################
@@ -23,8 +24,9 @@ GTSCREEN_SRCS := ./main.c			\
 		 ./platform/linux-spr16-msgs.c	\
 		 ./platform/linux-spr16-server.c
 
-GTSCREEN_OBJS := $(GTSCREEN_SRCS:.c=.gtscreen.o)
-
+GTSCREEN_OBJS := $(GTSCREEN_SRCS:.c=.gtscreen.o) \
+		 ./platform/x86.asm.o
+# example program
 SPR16_EX_SRCS := ./examples/spr16-example.c	\
 		 ./examples/game.c		\
 		 ./examples/dynamics.c		\
@@ -34,26 +36,27 @@ SPR16_EX_SRCS := ./examples/spr16-example.c	\
 		 ./platform/linux-spr16-client.c
 SPR16_EX_OBJS := $(SPR16_EX_SRCS:.c=.spr16_ex.o)
 
-FAUX11_GFX_SRCS :=	 ./driver/faux11.c		\
-		 ./driver/faux11_client.c	\
-		 ./platform/linux-spr16-msgs.c	\
-		 ./platform/linux-spr16-client.c
-		#./driver/faux11_cursor.c
-FAUX11_GFX_OBJS := $(FAUX11_GFX_SRCS:.c=.faux11_gfx.o)
+#  spr16-x11-xorg graphic drivers
+SPORG_GFX_SRCS := 	./airlock/driver/x11/sporg.c		\
+			./airlock/driver/x11/sporg_client.c	\
+			./platform/linux-spr16-msgs.c		\
+			./platform/linux-spr16-client.c
+SPORG_GFX_OBJS := $(SPORG_GFX_SRCS:.c=.sporg_gfx.o)
 # TODO wtf is up with that pixman directory name!?
-FAUX11_GFX_INC := -I/usr/include/xorg -I/usr/include/pixman-1
+SPORG_GFX_INC := -I/usr/include/xorg -I/usr/include/pixman-1
 
-FAUX11_INPUT_SRCS :=	 ./driver/faux11_input.c
-FAUX11_INPUT_OBJS := $(FAUX11_INPUT_SRCS:.c=.faux11_input.o)
-FAUX11_INPUT_INC := -I/usr/include/xorg -I/usr/include/pixman-1
+#  spr16-x11-xorg input driver
+SPORG_INPUT_SRCS :=	 ./airlock/driver/x11/sporg_input.c
+SPORG_INPUT_OBJS := $(SPORG_INPUT_SRCS:.c=.sporg_input.o)
+SPORG_INPUT_INC := -I/usr/include/xorg -I/usr/include/pixman-1
 
 ########################################
 # target files
 ########################################
 GTSCREEN := gtscreen
 SPR16_EX := spr16_example
-FAUX11_GFX   := faux11_drv.so
-FAUX11_INPUT := faux11input_drv.so
+SPORG_GFX   := sporg_drv.so
+SPORG_INPUT := sporginput_drv.so
 
 
 ########################################
@@ -61,19 +64,21 @@ FAUX11_INPUT := faux11input_drv.so
 ########################################
 #%.o: %.c
 #	$(CC) -c $(DEFLANG) $(CFLAGS) $(DBG) -o $@ $<
+%.asm.o: %.s
+	$(AS) -o $@ $<
 %.gtscreen.o: %.c
 	$(CC) -c $(DEFLANG) -DSPR16_SERVER $(CFLAGS) $(DBG) -o $@ $<
 %.spr16_ex.o: %.c
 	$(CC) -c $(DEFLANG) $(CFLAGS) $(DBG) -o $@ $<
-%.faux11_gfx.o: %.c
-	$(CC) -c -std=gnu99 -pedantic -Wall -fPIC $(DBG) $(FAUX11_GFX_INC) -o $@ $<
-%.faux11_input.o: %.c
-	$(CC) -c -std=gnu99 -pedantic -Wall -fPIC $(DBG) $(FAUX11_INPUT_INC) -o $@ $<
+%.sporg_gfx.o: %.c
+	$(CC) -c -std=gnu99 -pedantic -Wall -fPIC $(DBG) $(SPORG_GFX_INC) -o $@ $<
+%.sporg_input.o: %.c
+	$(CC) -c -std=gnu99 -pedantic -Wall -fPIC $(DBG) $(SPORG_INPUT_INC) -o $@ $<
 all:			\
 	$(GTSCREEN)	\
 	$(SPR16_EX)	\
-	$(FAUX11_GFX)	\
-	$(FAUX11_INPUT)
+	$(SPORG_GFX)	\
+	$(SPORG_INPUT)
 
 ########################################
 # targets
@@ -94,19 +99,19 @@ $(SPR16_EX):		$(SPR16_EX_OBJS)
 			@echo "x---------------------x"
 			@echo ""
 
-$(FAUX11_GFX):		$(FAUX11_GFX_OBJS)
-			$(CC) $(LDFLAGS) -shared $(FAUX11_GFX_OBJS) -o $@
+$(SPORG_GFX):		$(SPORG_GFX_OBJS)
+			$(CC) $(LDFLAGS) -shared $(SPORG_GFX_OBJS) -o $@
 			@echo ""
 			@echo "x---------------------x"
-			@echo "| faux11_gfx       OK |"
+			@echo "| sporg_gfx        OK |"
 			@echo "x---------------------x"
 			@echo ""
 
-$(FAUX11_INPUT):	$(FAUX11_INPUT_OBJS)
-			$(CC) $(LDFLAGS) -shared -lX11 $(FAUX11_INPUT_OBJS) -o $@
+$(SPORG_INPUT):	$(SPORG_INPUT_OBJS)
+			$(CC) $(LDFLAGS) -shared -lX11 $(SPORG_INPUT_OBJS) -o $@
 			@echo ""
 			@echo "x---------------------x"
-			@echo "| faux11_input     OK |"
+			@echo "| sporg_input      OK |"
 			@echo "x---------------------x"
 			@echo ""
 
@@ -116,12 +121,12 @@ $(FAUX11_INPUT):	$(FAUX11_INPUT_OBJS)
 clean:
 	@$(foreach obj, $(GTSCREEN_OBJS), rm -fv $(obj);)
 	@$(foreach obj, $(SPR16_EX_OBJS), rm -fv $(obj);)
-	@$(foreach obj, $(FAUX11_GFX_OBJS), rm -fv $(obj);)
-	@$(foreach obj, $(FAUX11_INPUT_OBJS), rm -fv $(obj);)
+	@$(foreach obj, $(SPORG_GFX_OBJS), rm -fv $(obj);)
+	@$(foreach obj, $(SPORG_INPUT_OBJS), rm -fv $(obj);)
 
 	@-rm -fv ./$(GTSCREEN)
 	@-rm -fv ./$(SPR16_EX)
-	@-rm -fv ./$(FAUX11_GFX)
-	@-rm -fv ./$(FAUX11_INPUT)
+	@-rm -fv ./$(SPORG_GFX)
+	@-rm -fv ./$(SPORG_INPUT)
 	@echo "cleaned."
 

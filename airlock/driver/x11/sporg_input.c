@@ -21,7 +21,7 @@
  *
  * ---------------------------------------------------------------------------
  *  originally void.c from xf86-input-void
- *  modified: 2016 Michael R. Tirado
+ *  modified: 2016 Michael R. Tirado, NorthEastAmerica. <mtirado418@gmail.com>
  */
 
 #define _GNU_SOURCE
@@ -57,7 +57,7 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <linux/input.h>
-#include "faux11.h"
+#include "sporg.h"
 #include <xorg/input.h>
 #include <xorg/xkbsrv.h>
 #define STRERR strerror(errno)
@@ -89,7 +89,9 @@ static uint32_t ctrl_to_x11(unsigned char c)
 		default: return 0;
 	}
 }
-
+/*
+ * TODO many keys missing, numpad!!
+ */
 static uint32_t to_x11(uint16_t k_c)
 {
 	if (k_c <= 0x00ff) /* ascii */ {
@@ -199,7 +201,7 @@ static int ascii_kbd_is_shifted(unsigned char c)
 		|| 	(c > 122 && c < 127));
 }
 
-static void fx11_ascii_mode(InputInfoPtr info, struct spr16_msgdata_input *msg)
+static void sporg_ascii_mode(InputInfoPtr info, struct spr16_msgdata_input *msg)
 {
 	uint32_t k_c;
 	int state_shifted;
@@ -285,7 +287,7 @@ static void key_event(InputInfoPtr info, struct spr16_msgdata_input *msg)
 	}
 }
 
-static void fx11ReadInput(InputInfoPtr pInfo)
+static void sporgReadInput(InputInfoPtr pInfo)
 {
 	struct spr16_msgdata_input msgs[1024];
 	int post_relative = 0;
@@ -314,7 +316,7 @@ intr:
 			break;
 		case SPR16_INPUT_KEY_ASCII:
 			/* this is a fallback */
-			fx11_ascii_mode(pInfo, &msgs[i]);
+			sporg_ascii_mode(pInfo, &msgs[i]);
 			break;
 		default:
 			break;
@@ -447,7 +449,7 @@ static int xf86VoidInit(InputDriverPtr drv, InputInfoPtr pInfo,	int flags)
 	char *fdnum;
 	char *err = NULL;
 
-	fdnum = getenv("FAUX_INPUT_READ");
+	fdnum = getenv("SPORG_INPUT_READ");
 	if (fdnum == NULL) {
 		fprintf(stderr, "couldn't locate input descriptor\n");
 		return -1;
@@ -459,13 +461,13 @@ static int xf86VoidInit(InputDriverPtr drv, InputInfoPtr pInfo,	int flags)
 		return -1;
 	}
 	fprintf(stderr, "--------------------------------------------------\n");
-	fprintf(stderr, "- faux11 input init ------------------------------\n");
+	fprintf(stderr, "- sporg input init ------------------------------\n");
 	fprintf(stderr, "--------------------------------------------------\n");
 
 	/* Initialise the InputInfoRec. */
-	pInfo->type_name = "faux11input";
+	pInfo->type_name = "sporginput";
 	pInfo->device_control = xf86VoidControlProc;
-	pInfo->read_input = fx11ReadInput;
+	pInfo->read_input = sporgReadInput;
 	pInfo->control_proc = NULL;
 	pInfo->switch_mode = NULL;
 	pInfo->fd = input_read_fd; /* read end (needs O_ASYNC) */
@@ -480,9 +482,9 @@ static int xf86VoidInit(InputDriverPtr drv, InputInfoPtr pInfo,	int flags)
 	return 0;
 }
 
-_X_EXPORT InputDriverRec FAUX11INPUT = {
+_X_EXPORT InputDriverRec SPORGINPUT = {
 	1,			/* driver version */
-	"faux11input",		/* driver name */
+	"sporginput",		/* driver name */
 	NULL,			/* identify */
 	xf86VoidInit,		/* pre-init */
 	xf86VoidUninit,		/* un-init */
@@ -512,13 +514,13 @@ static void xf86VoidUnplug(pointer p)
  */
 static pointer xf86VoidPlug(pointer module, pointer options, int *errmaj, int *errmin)
 {
-	xf86AddInputDriver(&FAUX11INPUT, module, 0);
+	xf86AddInputDriver(&SPORGINPUT, module, 0);
 	return module;
 }
 
 static XF86ModuleVersionInfo xf86VoidVersionRec =
 {
-	"faux11input",
+	"sporginput",
 	MODULEVENDORSTRING,
 	MODINFOSTRING1,
 	MODINFOSTRING2,
@@ -531,7 +533,7 @@ static XF86ModuleVersionInfo xf86VoidVersionRec =
 	/* a tool */
 };
 
-_X_EXPORT XF86ModuleData faux11inputModuleData = {
+_X_EXPORT XF86ModuleData sporginputModuleData = {
 	&xf86VoidVersionRec,
 	xf86VoidPlug,
 	xf86VoidUnplug
