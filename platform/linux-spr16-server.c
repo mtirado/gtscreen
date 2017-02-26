@@ -21,6 +21,7 @@
 #include <signal.h>
 #include <time.h>
 #include "../protocol/spr16.h"
+#include "../screen.h"
 
 extern sig_atomic_t g_mute_input; /* don't forward input if muted */
 extern sig_atomic_t g_unmute_input;
@@ -30,7 +31,7 @@ extern sig_atomic_t g_unmute_input;
 extern struct drm_state g_state;
 
 extern void load_linux_input_drivers(struct input_device **device_list,
-		int epoll_fd, int stdin_mode, int evdev);
+		int epoll_fd, int stdin_mode, int evdev, input_hotkey hk);
 
 /*extern void x86_sse2_xmmcpy_256(char *dest, char *src, unsigned int count);
 extern void x86_sse2_xmmcpy_512(char *dest, char *src, unsigned int count);
@@ -41,87 +42,68 @@ extern void x86_sse2_xmmcpy_1024(char *dest, char *src, unsigned int count);(*/
 
 #define STRERR strerror(errno)
 
-struct client
-{
-	struct spr16 sprite;
-	struct client *next;
-	int handshaking;
-	int connected;
-	int socket;
-};
-
-struct client *g_focused_client;
-struct client *g_clients;
-struct client *g_dispatch_client; /* set to null, unless dispatching msgs */
+struct screen *g_main_screen;
+struct client *g_pending_clients; /* clients with incomplete handshakes */
+struct client *g_dispatch_client; /* null unless dispatching a message */
 uint16_t g_width;
 uint16_t g_height;
 uint16_t g_bpp;
 
 int g_epoll_fd;
-int g_soft_cursor; /* TODO */
-
 
 struct input_device *g_input_devices;
 
-static struct client *spr16_server_getclient(int fd)
+static struct client *server_remove_pending(int fd)
 {
-	struct client *cl;
-	cl = g_clients;
+	struct client **trail = &g_pending_clients;
+	struct client     *cl =  g_pending_clients;
 	while (cl)
 	{
-		if (cl->socket == fd)
+		if (cl->socket == fd) {
+			*trail = cl->next;
 			break;
+		}
+		trail = &cl->next;
 		cl = cl->next;
 	}
 	return cl;
 }
 
-static int spr16_server_addclient(int fd)
+static struct client *server_getclient(int fd)
 {
-	struct epoll_event ev;
-	struct client *cl;
-	memset(&ev, 0, sizeof(ev));
-	if (spr16_server_getclient(fd)) {
-		errno = EEXIST;
-		return -1;
+	struct client *cl = NULL;
+	struct screen *scrn;
+	scrn = g_main_screen;
+	while (scrn)
+	{
+		cl = screen_find_client(scrn, fd);
+		if (cl)
+			return cl;
+		scrn = scrn->next;
 	}
 
-	cl = malloc(sizeof(*cl));
-	if (cl == NULL) {
-		return -1;
+	cl = g_pending_clients;
+	while (cl)
+	{
+		if (cl->socket == fd) {
+			return cl;
+		}
 	}
-	memset(cl, 0, sizeof(*cl));
-	cl->sprite.shmem.fd = -1;
-
-	ev.events = EPOLLIN;
-	ev.data.fd = fd;
-	if (epoll_ctl(g_epoll_fd, EPOLL_CTL_ADD, fd, &ev)) {
-		printf("epoll_ctl(add): %s\n", STRERR);
-		goto err;
-	}
-
-	/* send server info to client */
-	if (spr16_server_servinfo(fd)) {
-		epoll_ctl(g_epoll_fd, EPOLL_CTL_DEL, fd, NULL);
-		goto err;
-	}
-	cl->connected = 0;
-	cl->socket = fd;
-	cl->next   = g_clients;
-	g_clients  = cl;
-
-	printf("client added to server\n\n\n");
-	return 0;
-err:
-	free(cl);
-	return -1;
-
+	return NULL;
 }
-
-static int spr16_server_freeclient(struct client *c)
+static void server_close_socket(int fd)
+{
+	epoll_ctl(g_epoll_fd, EPOLL_CTL_DEL, fd, NULL);
+	close(fd);
+}
+static int server_free_client(struct client *c)
 {
 	int ret = 0;
+	server_close_socket(c->socket);
 	if (c->sprite.shmem.size) {
+		/* TODO should use PROT_WRITE + shared
+		 * to force clearing sprites on disconnect
+		 * memset(c->sprite.shmem.addr, 0xAA, c->sprite.shmem.size);*/
 		close(c->sprite.shmem.fd);
 		if (munmap(c->sprite.shmem.addr, c->sprite.shmem.size)) {
 			printf("unable to unmap shared memory: %p, %d: %s\n",
@@ -133,46 +115,112 @@ static int spr16_server_freeclient(struct client *c)
 	free(c);
 	return ret;
 }
-
-static int spr16_server_removeclient(int fd)
+static int server_remove_client(int fd)
 {
-	struct client *prev, *cl;
+	struct screen *scrn;
+	struct screen **trail;
+	struct client *cl;
 
-	prev = NULL;
-	cl = g_clients;
-	while (cl)
+	errno = 0;
+	scrn  =  g_main_screen;
+	trail = &g_main_screen;
+	while (scrn)
 	{
-		if (cl->socket == fd)
-			break;
-		prev = cl;
-		cl = cl->next;
+		cl = screen_remove_client(scrn, fd);
+		if (cl) {
+			spr16_send_ack(fd, SPR16_NACK, SPRITENACK_DISCONNECT);
+			if (server_free_client(cl))
+				return -1;
+			*trail = scrn->next;
+			free(scrn); /* FIXME, add multiple clients */
+			return 0;
+		}
+		trail = &scrn->next;
+		scrn  =  scrn->next;
 	}
-	if (cl == NULL) {
-		epoll_ctl(g_epoll_fd, EPOLL_CTL_DEL, fd, NULL);
+	if (server_remove_pending(fd) == NULL) {
+		server_close_socket(fd);
 		errno = ESRCH;
-		close(fd);
 		return -1;
 	}
-	if (prev == NULL)
-		g_clients = NULL;
-	else
-		prev->next = cl->next;
-
-	if (g_focused_client == cl)
-		g_focused_client = NULL;
-
-	if (epoll_ctl(g_epoll_fd, EPOLL_CTL_DEL, fd, NULL)) {
-		printf("epoll_ctl(del): %s\n", STRERR);
-		free(cl);
-		close(fd);
-		return -1;
-	}
-
-	spr16_send_ack(fd, SPRITE_NACK, SPRITENACK_DISCONNECT);
-	close(fd);
-	if (spr16_server_freeclient(cl))
-		return -1;
 	return 0;
+}
+
+static int server_connect_client(struct client *cl)
+{
+	struct screen *scrn, *tmp;
+
+	/* hacky right now, only one client per screen */
+	scrn = malloc(sizeof(struct screen));
+	if (scrn == NULL)
+		return -1;
+	if (screen_init(scrn))
+		goto err;
+	if (screen_add_client(scrn, cl))
+		goto err;
+	/* add to end of screen list */
+	tmp = g_main_screen;
+	if (tmp) {
+		while (tmp->next)
+		{
+			tmp = tmp->next;
+		}
+		tmp->next = scrn;
+		printf("-- new screen added to existing list --\n");
+	}
+	else {
+		g_main_screen = scrn;
+		printf("-- new screen added to empty list --\n");
+	}
+	cl->connected = 1;
+	cl->handshaking = 0;
+	return 0;
+err:
+	free(scrn);
+	return -1;
+}
+
+static int server_addclient(int fd)
+{
+	struct epoll_event ev;
+	struct client *cl;
+
+	errno = 0;
+	memset(&ev, 0, sizeof(ev));
+	if (server_getclient(fd)) {
+		errno = EEXIST;
+		return -1;
+	}
+
+	cl = malloc(sizeof(*cl));
+	if (cl == NULL) {
+		return -1;
+	}
+	memset(cl, 0, sizeof(*cl));
+	cl->sprite.shmem.fd = -1;
+
+	/* send server info to client */
+	if (spr16_server_servinfo(fd)) {
+		goto err;
+	}
+
+	ev.events = EPOLLIN;
+	ev.data.fd = fd;
+	if (epoll_ctl(g_epoll_fd, EPOLL_CTL_ADD, fd, &ev)) {
+		printf("epoll_ctl(add): %s\n", STRERR);
+		goto err;
+	}
+
+	cl->connected = 0;
+	cl->socket = fd;
+	cl->next = g_pending_clients;
+	g_pending_clients = cl;
+
+	printf("client(%d)added to server\n", fd);
+	return 0;
+err:
+	free(cl);
+	return -1;
 }
 
 int spr16_server_servinfo(int fd)
@@ -197,7 +245,7 @@ again:
 
 int spr16_server_register_sprite(int fd, struct spr16_msgdata_register_sprite *reg)
 {
-	struct client *cl = spr16_server_getclient(fd);
+	struct client *cl = server_getclient(fd);
 	printf("server got register_sprite\n");
 	if (cl == NULL)
 		return -1;
@@ -209,17 +257,17 @@ int spr16_server_register_sprite(int fd, struct spr16_msgdata_register_sprite *r
 	}
 	if (reg->width > g_width || !reg->width) {
 		printf("bad width\n");
-		spr16_send_ack(fd, SPRITE_NACK, SPRITENACK_WIDTH);
+		spr16_send_ack(fd, SPR16_NACK, SPRITENACK_WIDTH);
 		return -1;
 	}
 	if (reg->height > g_height || !reg->height) {
 		printf("bad height\n");
-		spr16_send_ack(fd, SPRITE_NACK, SPRITENACK_HEIGHT);
+		spr16_send_ack(fd, SPR16_NACK, SPRITENACK_HEIGHT);
 		return -1;
 	}
 	if (reg->bpp > g_bpp || reg->bpp < 8) {
 		printf("bad bpp\n");
-		spr16_send_ack(fd, SPRITE_NACK, SPRITENACK_BPP);
+		spr16_send_ack(fd, SPR16_NACK, SPRITENACK_BPP);
 		return -1;
 	}
 	cl->handshaking = 1;
@@ -227,7 +275,7 @@ int spr16_server_register_sprite(int fd, struct spr16_msgdata_register_sprite *r
 	cl->sprite.width = reg->width;
 	cl->sprite.height = reg->height;
 	cl->sprite.shmem.size = (reg->bpp/8) * reg->width * reg->height;
-	if (spr16_send_ack(fd, SPRITE_ACK, SPRITEACK_SEND_DESCRIPTOR)) {
+	if (spr16_send_ack(fd, SPR16_ACK, SPRITEACK_SEND_DESCRIPTOR)) {
 		printf("send_descriptor ack failed\n");
 		return -1;
 	}
@@ -240,7 +288,7 @@ static int open_log(char *socketname)
 	int fd;
 	setvbuf(stdout, NULL, _IOLBF, 0);
 	setvbuf(stderr, NULL, _IOLBF, 0);
-	snprintf(path, sizeof(path), "%s/%s", SPRITE_LOGPATH, socketname);
+	snprintf(path, sizeof(path), "%s/%s", SPR16_LOGPATH, socketname);
 	fd = open(path, O_WRONLY|O_CLOEXEC|O_CREAT|O_TRUNC, 0755);
 	if (fd == -1) {
 		printf("open log: %s\n", STRERR);
@@ -266,7 +314,7 @@ static int server_create_socket()
 
 	addr.sun_family = AF_UNIX;
 	/* TODO detect current vt*/
-	snprintf(addr.sun_path, sizeof(addr.sun_path), "%s/tty1", SPRITE_SOCKPATH);
+	snprintf(addr.sun_path, sizeof(addr.sun_path), "%s/tty1", SPR16_SOCKPATH);
 	/* TODO check perms sticky bit on dir, etc */
 	sock = socket(AF_UNIX, SOCK_STREAM|SOCK_CLOEXEC|SOCK_NONBLOCK, 0);
 	if (sock == -1) {
@@ -302,28 +350,22 @@ static int server_create_socket()
 		close(sock);
 		close(g_epoll_fd);
 		g_epoll_fd = -1;
+		return -1;
 	}
 	return sock;
 }
 
 int spr16_server_init(uint16_t width, uint16_t height, uint16_t bpp)
 {
+	g_main_screen = NULL;
 	g_input_devices = NULL;
-	g_clients = NULL;
 	g_dispatch_client = NULL;
-	g_focused_client = NULL;
+	g_pending_clients = NULL;
 	g_epoll_fd = -1;
 	g_width = width;
 	g_height = height;
 	g_bpp = bpp;
 	return server_create_socket();
-}
-
-
-int spr16_server_init_input()
-{
-	load_linux_input_drivers(&g_input_devices, g_epoll_fd, 0, 1);
-	return 0;
 }
 
 static int flush_all_devices()
@@ -354,10 +396,16 @@ static int input_event(int evfd)
 	struct input_device *device;
 	int cl_fd;
 
-	if (g_focused_client == NULL) {
-		g_focused_client = g_clients;
+	if (!g_main_screen) {
+		cl_fd = -1;
 	}
-	cl_fd = g_focused_client ? g_focused_client->socket : -1;
+	else {
+		if (g_main_screen->focused_client == NULL) {
+			g_main_screen->focused_client = g_main_screen->clients;
+		}
+		cl_fd = g_main_screen->focused_client
+			? g_main_screen->focused_client->socket : -1;
+	}
 
 	if (g_unmute_input) {
 		g_unmute_input = 0;
@@ -370,15 +418,15 @@ static int input_event(int evfd)
 	{
 		if (evfd == device->fd) {
 			if (g_mute_input) {
-				if (device->func_read(device, -1)) {
+				if (device->func_transceive(device, -1)) {
 					return -1;
 				}
 			}
 			else {
-				if (device->func_read(device, cl_fd)) {
+				if (device->func_transceive(device, cl_fd)) {
 					if (errno == EPIPE) {
 						/* client pipe broke */
-						spr16_server_removeclient(cl_fd);
+						server_remove_client(cl_fd);
 						return 1;
 					}
 					return -1;
@@ -413,7 +461,8 @@ static int spr16_accept_connection(struct epoll_event *ev)
 		}
 		/* TODO we should rate limit this per uid, and timeout drop,
 		 * also add a handshake timeout */
-		if (spr16_server_addclient(newsock)) {
+		if (server_addclient(newsock)) {
+			printf("server_addclient(%d) failed\n", newsock);
 			close(newsock);
 			return -1;
 		}
@@ -446,25 +495,16 @@ int spr16_server_handshake(struct client *cl)
 	}
 	cl->sprite.shmem.fd = fd;
 	if (spr16_server_open_memfd(cl)) {
-		spr16_send_ack(fd, SPRITE_NACK, SPRITENACK_SHMEM);
+		spr16_send_ack(fd, SPR16_NACK, SPRITENACK_SHMEM);
 		return -1;
 	}
-	if (spr16_send_ack(cl->socket, SPRITE_ACK, SPRITEACK_ESTABLISHED)) {
+	if (spr16_send_ack(cl->socket, SPR16_ACK, SPRITEACK_ESTABLISHED)) {
 		printf("established ack failed\n");
 		return -1;
 	}
 	return 0;
 }
 
-/*
- *
- * TODO arch specific ops to optimize sprite synchronization. sse, neon, etc
- * alpha blending is probably best left to gpu-land, but could also be handled this way.
- *
- * could add a mode that sends pixels over af_unix, for systems without memfd,
- * or any other means of buffer sharing.
- *
- */
 /* TODO decouple linux-DRM and spr16
  * this is a big ugly hack right now
  * */
@@ -493,6 +533,16 @@ int spr16_server_sync(struct spr16_msgdata_sync *region)
 	if (cl == NULL) {
 		printf("null dispatch?\n");
 		return -1;
+	}
+	if (g_main_screen == NULL
+			|| screen_find_client(g_main_screen,
+					      g_dispatch_client->socket) == NULL) {
+		/* TODO, optimize  this lookup is not needed
+		 * accumulate sync grid for unfocused screens
+		 * and/or use a message to coordinate focused status with clients
+		 * if they don't need to render in background wastefully.
+		 */
+		return 0;
 	}
 	if (!g_state.sfb || !g_state.sfb->addr || !cl->sprite.shmem.addr) {
 		printf("bad ptr\n");
@@ -583,38 +633,41 @@ int spr16_server_update(int listen_fd)
 			struct client *cl;
 			char *msgbuf;
 			uint32_t msglen;
-			cl = spr16_server_getclient(evfd);
+			cl = server_getclient(evfd);
 			if (cl == NULL) {
-				printf("client missing\n");
-				close(evfd);
+				printf("client(%d) missing\n", evfd);
+				server_remove_client(evfd);
 				continue;
 			}
 			if (cl->handshaking) {
+				server_remove_pending(cl->socket);
 				if (spr16_server_handshake(cl)) {
 					printf("handshake failed\n");
-					spr16_server_removeclient(evfd);
+					server_free_client(cl);
 					continue;
 				}
-				cl->connected = 1;
-				cl->handshaking = 0;
-				/* switch focus to new client */
-				if (g_focused_client == NULL)
-					g_focused_client = cl;
-
+				if (server_connect_client(cl)) {
+					printf("connect failed\n");
+					server_free_client(cl);
+				}
+				else {
+					printf("handshake complete\n");
+				}
 				continue;
 			}
-			/* read and dispatch */
+
+			/* normal read and dispatch */
 			msgbuf = spr16_read_msgs(evfd, &msglen);
 			if (msgbuf == NULL) {
 				printf("read_msgs: %s\n", STRERR);
-				spr16_server_removeclient(evfd);
+				server_remove_client(evfd);
 				continue;
 			}
 			g_dispatch_client = cl;
 			if (spr16_dispatch_msgs(evfd, msgbuf, msglen)) {
 				g_dispatch_client = NULL;
 				printf("dispatch_msgs: %s\n", STRERR);
-				spr16_server_removeclient(evfd);
+				server_remove_client(evfd);
 				continue;
 			}
 			g_dispatch_client = NULL;
@@ -627,18 +680,104 @@ int spr16_server_update(int listen_fd)
 int spr16_server_shutdown(int listen_fd)
 {
 	printf("--- server shutdown ---\n");
-	while (g_clients)
+	while (g_main_screen)
 	{
-		struct client *tmp = g_clients->next;
-		spr16_send_ack(g_clients->socket, SPRITE_NACK, SPRITENACK_DISCONNECT);
-		spr16_server_freeclient(g_clients);
-		g_clients = tmp;
+		struct screen *next_screen = g_main_screen->next;
+		while (g_main_screen->clients)
+		{
+			struct client *next_client = g_main_screen->clients->next;
+			spr16_send_ack(g_main_screen->clients->socket,
+					SPR16_NACK, SPRITENACK_DISCONNECT);
+			server_free_client(g_main_screen->clients);
+			g_main_screen->clients = next_client;
+		}
+		free(g_main_screen);
+		g_main_screen = next_screen;
 	}
 	close(listen_fd);
 	close(g_epoll_fd);
 	g_epoll_fd = -1;
-	g_clients = NULL;
-	g_focused_client = NULL;
+	g_main_screen = NULL;
+	return 0;
+}
+
+static void server_sync_fullscreen()
+{
+	struct client *cl = g_main_screen->clients;
+	while (cl)
+	{
+		struct spr16_msgdata_sync sync;
+		sync.x = 0;
+		sync.y = 0;
+		sync.width = cl->sprite.width;
+		sync.height = cl->sprite.height;
+		g_dispatch_client = cl;
+		spr16_server_sync(&sync);
+		g_dispatch_client = NULL;
+		cl = cl->next;
+	}
+}
+
+/*
+ * -1  next screen
+ * -2  prev screen
+ * >=0 TODO screenid
+ *
+ */
+static int main_screen_switch(int scrn)
+{
+	struct screen *oldmain, *tmp;
+	if (g_main_screen == NULL) {
+		printf("no main\n");
+		return 0;
+	}
+
+	/* next */
+	if (scrn == -1) {
+		if (g_main_screen->next == NULL) {
+			printf("no next\n");
+			return 0;
+		}
+		oldmain = tmp = g_main_screen;
+		g_main_screen = oldmain->next;
+		while (tmp->next)
+		{
+			tmp = tmp->next;
+		}
+		tmp->next = oldmain;
+		oldmain->next = NULL;
+		printf("scrn_next\n");
+	}
+	else if (scrn == -2) { /* prev */
+
+	}
+	else if (scrn >= 0) { /* idx */
+
+	}
+	else {
+		return -1;
+	}
+	server_sync_fullscreen();
+	return 0;
+}
+
+
+int hotkey_callback(uint32_t hk, void *v)
+{
+	switch (hk)
+	{
+		case SPR16_HOTKEY_NEXTSCREEN:
+		case SPR16_HOTKEY_PREVSCREEN:
+			return main_screen_switch(-1);
+		default:
+			return -1;
+	}
+	(void)v;
+}
+
+int spr16_server_init_input()
+{
+	load_linux_input_drivers(&g_input_devices, g_epoll_fd, 0, 1, &hotkey_callback);
 	return 0;
 }
 

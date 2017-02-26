@@ -31,17 +31,17 @@
  *
  */
 
-/* XXX NOTE: all structs must be evenly sized / divide evenly by 2, unless you
- * want to handle adding a triple read when msg truncates with 1 byte fragment
+/* NOTE: all structs must be evenly sized / divide evenly by 2, unless you
+ * want to handle adding a triple read if msg truncates with 1 byte fragment
  */
 
-#define SPRITE_MAXMSGLEN 64 /* hdr+data */
-#define SPRITE_MAXNAME   32
-#define SPRITE_SOCKPATH "/tmp/spr16"
-#define SPRITE_LOGPATH "/usr/var/log/spr16"
-#define SPRITE_ACK  1
-#define SPRITE_NACK 0
-
+#define SPR16_MAXMSGLEN 64 /* hdr+data */
+#define SPR16_MAXNAME   32
+#define SPR16_SOCKPATH "/tmp/spr16"
+#define SPR16_LOGPATH "/usr/var/log/spr16"
+#define SPR16_ACK  1
+#define SPR16_NACK 0
+#define SPR16_MAXCLIENTS 128
 /* TODO set sticky bit and check that, + perms like xephyr does ;)
  *
  * */
@@ -88,7 +88,7 @@ struct spr16_shmem {
 
 /* sprite object */
 struct spr16 {
-	char name[SPRITE_MAXNAME];
+	char name[SPR16_MAXNAME];
 	struct spr16_shmem shmem;
 	uint32_t flags;
 	int16_t  x;
@@ -121,7 +121,7 @@ struct spr16_msgdata_servinfo {
 /* this message is immediately followed by 1 byte SCM_RIGHTS message
  * to transfer sprite file descriptor to server process */
 struct spr16_msgdata_register_sprite {
-	char name[SPRITE_MAXNAME];
+	char name[SPR16_MAXNAME];
 	uint16_t width;
 	uint16_t height;
 	uint16_t bpp;
@@ -164,7 +164,7 @@ enum {
 #define SPR16_INPUT_FLAG_RAW   0x20 /* raw bytes, application specific */
 /* 0x40, 0x80 */
 
-/* TODO some other ways to vt switch other than linux kernel vt keyboard */
+/* TODO some vt switch other than linux kernel vt keyboard */
 #define SPR16_KEYMOD_LALT  0x00000001
 #define SPR16_KEYMOD_LCTRL 0x00000002
 
@@ -261,6 +261,14 @@ int spr16_client_set_servinfo_handler(servinfo_handler func);
 /*----------------------------------------------*
  * server side                                  *
  *----------------------------------------------*/
+struct client
+{
+	struct spr16 sprite;
+	struct client *next;
+	int handshaking;
+	int connected; /* set nonzero after handshake */
+	int socket;
+};
 int spr16_server_init(uint16_t width, uint16_t height, uint16_t bpp);
 int spr16_server_servinfo(int fd);
 int spr16_server_sync(struct spr16_msgdata_sync *region);
@@ -290,22 +298,33 @@ int spr16_server_shutdown(int listen_fd);
  */
 
 
-
 /*----------------------------------------------*
  * input drivers                                *
  *----------------------------------------------*/
+/* server callback for hotkey events */
 struct input_device;
-typedef int (*input_read)(struct input_device *self, int client);
+enum {
+	SPR16_HOTKEY_NEXTSCREEN = 1,
+	SPR16_HOTKEY_PREVSCREEN
+};
+typedef int (*input_hotkey)(uint32_t hk, void *v);
+typedef int (*input_transceive)(struct input_device *self, int client);
 typedef int (*input_flush)(struct input_device *self);
 struct input_device {
 	char path[128];
 	char name[64];
-	struct input_device *next;
-	input_read  func_read;
 	input_flush func_flush;
+	input_transceive func_transceive;
+	input_hotkey func_hotkey;
+	struct input_device *next;
 	uint32_t private;
 	uint32_t keyflags;
 	int fd;
 };
 
+struct screen {
+	struct screen *next;
+	struct client *clients;
+	struct client *focused_client;
+};
 #endif

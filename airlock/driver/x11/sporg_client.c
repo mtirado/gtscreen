@@ -83,7 +83,7 @@ err:
 uint16_t g_width, g_height;
 int handle_servinfo_connect(struct spr16_msgdata_servinfo *sinfo)
 {
-	char name[SPRITE_MAXNAME];
+	char name[SPR16_MAXNAME];
 	snprintf(name, sizeof(name), "sporg-%d", getpid());
 	if (g_servinfo.bpp != sinfo->bpp) {
 		fprintf(stderr, "bpp mismatch \n");

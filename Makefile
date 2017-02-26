@@ -18,6 +18,7 @@ DEFLANG := -ansi
 # objects
 #########################################
 GTSCREEN_SRCS := ./main.c			\
+		 ./screen.c			\
 		 ./platform/linux-drm.c		\
 		 ./platform/linux-vt.c		\
 		 ./platform/linux-input.c	\

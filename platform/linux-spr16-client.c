@@ -72,7 +72,7 @@ int spr16_client_connect(char *name)
 
 	memset(&addr, 0, sizeof(addr));
 	addr.sun_family = AF_UNIX;
-	snprintf(addr.sun_path, sizeof(addr.sun_path), "%s/%s", SPRITE_SOCKPATH, name);
+	snprintf(addr.sun_path, sizeof(addr.sun_path), "%s/%s", SPR16_SOCKPATH, name);
 	/* TODO check perms, sticky bit on dir, etc */
 	g_socket = socket(AF_UNIX, SOCK_STREAM|SOCK_CLOEXEC|SOCK_NONBLOCK, 0);
 	if (g_socket == -1)
@@ -203,7 +203,7 @@ int spr16_client_handshake_start(char *name, uint16_t width, uint16_t height)
 	data.width = width;
 	data.height = height;
 	data.bpp = bpp;
-	snprintf(data.name, SPRITE_MAXNAME, "%s", name);
+	snprintf(data.name, SPR16_MAXNAME, "%s", name);
 	if (spr16_write_msg(g_socket, &hdr, &data, sizeof(data))) {
 		return -1;
 	}

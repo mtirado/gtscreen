@@ -27,6 +27,7 @@
 const char devpfx[] = "event";
 const char devdir[] = "/dev/input";
 
+
 int generic_flush(struct input_device *self)
 {
 	tcflush(self->fd, TCIFLUSH);
@@ -68,7 +69,7 @@ intr:
  * and doesnt support many useful keys like ctrl,alt,capslock,etc
  * we could add raw kbd support too, eventually...
  */
-static int read_ascii(struct input_device *self, int client)
+static int transceive_ascii(struct input_device *self, int client)
 {
 	unsigned char buf[1024];
 	int i, r;
@@ -102,7 +103,7 @@ interrupted:
 	return 0;
 }
 
-static int read_raw(struct input_device *self, int client)
+static int transceive_raw(struct input_device *self, int client)
 {
 	/* TODO */
 	(void)self;
@@ -110,129 +111,147 @@ static int read_raw(struct input_device *self, int client)
 	return -1;
 }
 
-static int evdev_translate_keycode(struct input_device *dev,
-				   struct spr16_msgdata_input *data)
+static int evdev_translate_keycode(struct input_device *self,
+				   struct spr16_msgdata_input *msg)
 {
 	uint32_t shift = 0;
-	(void)dev;
-	switch (data->code)
+	switch (msg->code)
 	{
 		/* chars > 127
-		 * TODO still missing some important keys 
+		 * TODO still missing some important keys
 		 */
-		case KEY_CAPSLOCK:   data->code = SPR16_KEYCODE_CAPSLOCK; break;
-		case KEY_LEFTSHIFT:  data->code = SPR16_KEYCODE_LSHIFT;   break;
-		case KEY_RIGHTSHIFT: data->code = SPR16_KEYCODE_RSHIFT;   break;
-		case KEY_LEFTCTRL:   data->code = SPR16_KEYCODE_LCTRL;    break;
-		case KEY_RIGHTCTRL:  data->code = SPR16_KEYCODE_RCTRL;    break;
-		case KEY_LEFTALT:    data->code = SPR16_KEYCODE_LALT;     break;
-		case KEY_RIGHTALT:   data->code = SPR16_KEYCODE_RALT;     break;
-		case KEY_UP: 	     data->code = SPR16_KEYCODE_UP;       break;
-		case KEY_DOWN:       data->code = SPR16_KEYCODE_DOWN;     break;
-		case KEY_LEFT:       data->code = SPR16_KEYCODE_LEFT;     break;
-		case KEY_RIGHT:      data->code = SPR16_KEYCODE_RIGHT;    break;
-		case KEY_PAGEUP:     data->code = SPR16_KEYCODE_PAGEUP;   break;
-		case KEY_PAGEDOWN:   data->code = SPR16_KEYCODE_PAGEDOWN; break;
-		case KEY_HOME:       data->code = SPR16_KEYCODE_HOME;     break;
-		case KEY_END:        data->code = SPR16_KEYCODE_END;      break;
-		case KEY_INSERT:     data->code = SPR16_KEYCODE_INSERT;   break;
-		case KEY_DELETE:     data->code = SPR16_KEYCODE_DELETE;   break;
+	case KEY_LEFTALT:
+		msg->code = SPR16_KEYCODE_LALT;
+		if (msg->val == 0) {
+			if (self->keyflags & SPR16_KEYMOD_LALT)
+				self->keyflags &= ~SPR16_KEYMOD_LALT;
+		}
+		else if (msg->val == 1) {
+			self->keyflags |= SPR16_KEYMOD_LALT;
+		}
+		break;
+	case KEY_LEFTCTRL:
+		msg->code = SPR16_KEYCODE_LCTRL;
+		if (msg->val == 0) {
+			if (self->keyflags & SPR16_KEYMOD_LCTRL)
+				self->keyflags &= ~SPR16_KEYMOD_LCTRL;
+		}
+		else if (msg->val == 1) {
+			self->keyflags |= SPR16_KEYMOD_LCTRL;
+		}
+		break;
 
-		case KEY_F1:  data->code = SPR16_KEYCODE_F1;  break;
-		case KEY_F2:  data->code = SPR16_KEYCODE_F2;  break;
-		case KEY_F3:  data->code = SPR16_KEYCODE_F3;  break;
-		case KEY_F4:  data->code = SPR16_KEYCODE_F4;  break;
-		case KEY_F5:  data->code = SPR16_KEYCODE_F5;  break;
-		case KEY_F6:  data->code = SPR16_KEYCODE_F6;  break;
-		case KEY_F7:  data->code = SPR16_KEYCODE_F7;  break;
-		case KEY_F8:  data->code = SPR16_KEYCODE_F8;  break;
-		case KEY_F9:  data->code = SPR16_KEYCODE_F9;  break;
-		case KEY_F10: data->code = SPR16_KEYCODE_F10; break;
-		case KEY_F11: data->code = SPR16_KEYCODE_F11; break;
-		case KEY_F12: data->code = SPR16_KEYCODE_F12; break;
-		case KEY_F13: data->code = SPR16_KEYCODE_F13; break;
-		case KEY_F14: data->code = SPR16_KEYCODE_F14; break;
-		case KEY_F15: data->code = SPR16_KEYCODE_F15; break;
-		case KEY_F16: data->code = SPR16_KEYCODE_F16; break;
-		case KEY_F17: data->code = SPR16_KEYCODE_F17; break;
-		case KEY_F18: data->code = SPR16_KEYCODE_F18; break;
-		case KEY_F19: data->code = SPR16_KEYCODE_F19; break;
-		case KEY_F20: data->code = SPR16_KEYCODE_F20; break;
-		case KEY_F21: data->code = SPR16_KEYCODE_F21; break;
-		case KEY_F22: data->code = SPR16_KEYCODE_F22; break;
-		case KEY_F23: data->code = SPR16_KEYCODE_F23; break;
-		case KEY_F24: data->code = SPR16_KEYCODE_F24; break;
+		case KEY_CAPSLOCK:   msg->code = SPR16_KEYCODE_CAPSLOCK; break;
+		case KEY_LEFTSHIFT:  msg->code = SPR16_KEYCODE_LSHIFT;   break;
+		case KEY_RIGHTSHIFT: msg->code = SPR16_KEYCODE_RSHIFT;   break;
+		case KEY_RIGHTCTRL:  msg->code = SPR16_KEYCODE_RCTRL;    break;
+		case KEY_RIGHTALT:   msg->code = SPR16_KEYCODE_RALT;     break;
+		case KEY_UP: 	     msg->code = SPR16_KEYCODE_UP;       break;
+		case KEY_DOWN:       msg->code = SPR16_KEYCODE_DOWN;     break;
+		case KEY_LEFT:       msg->code = SPR16_KEYCODE_LEFT;     break;
+		case KEY_RIGHT:      msg->code = SPR16_KEYCODE_RIGHT;    break;
+		case KEY_PAGEUP:     msg->code = SPR16_KEYCODE_PAGEUP;   break;
+		case KEY_PAGEDOWN:   msg->code = SPR16_KEYCODE_PAGEDOWN; break;
+		case KEY_HOME:       msg->code = SPR16_KEYCODE_HOME;     break;
+		case KEY_END:        msg->code = SPR16_KEYCODE_END;      break;
+		case KEY_INSERT:     msg->code = SPR16_KEYCODE_INSERT;   break;
+		case KEY_DELETE:     msg->code = SPR16_KEYCODE_DELETE;   break;
 
-		/*case KEY_KPASTERISK: data->code =  break;*/
-		/*case KEY_CAPSLOCK:   data->code = shift ? '' : ''; break;*/
+		case KEY_F1:  msg->code = SPR16_KEYCODE_F1;  break;
+		case KEY_F2:  msg->code = SPR16_KEYCODE_F2;  break;
+		case KEY_F3:  msg->code = SPR16_KEYCODE_F3;  break;
+		case KEY_F4:  msg->code = SPR16_KEYCODE_F4;  break;
+		case KEY_F5:  msg->code = SPR16_KEYCODE_F5;  break;
+		case KEY_F6:  msg->code = SPR16_KEYCODE_F6;  break;
+		case KEY_F7:  msg->code = SPR16_KEYCODE_F7;  break;
+		case KEY_F8:  msg->code = SPR16_KEYCODE_F8;  break;
+		case KEY_F9:  msg->code = SPR16_KEYCODE_F9;  break;
+		case KEY_F10: msg->code = SPR16_KEYCODE_F10; break;
+		case KEY_F11: msg->code = SPR16_KEYCODE_F11; break;
+		case KEY_F12: msg->code = SPR16_KEYCODE_F12; break;
+		case KEY_F13: msg->code = SPR16_KEYCODE_F13; break;
+		case KEY_F14: msg->code = SPR16_KEYCODE_F14; break;
+		case KEY_F15: msg->code = SPR16_KEYCODE_F15; break;
+		case KEY_F16: msg->code = SPR16_KEYCODE_F16; break;
+		case KEY_F17: msg->code = SPR16_KEYCODE_F17; break;
+		case KEY_F18: msg->code = SPR16_KEYCODE_F18; break;
+		case KEY_F19: msg->code = SPR16_KEYCODE_F19; break;
+		case KEY_F20: msg->code = SPR16_KEYCODE_F20; break;
+		case KEY_F21: msg->code = SPR16_KEYCODE_F21; break;
+		case KEY_F22: msg->code = SPR16_KEYCODE_F22; break;
+		case KEY_F23: msg->code = SPR16_KEYCODE_F23; break;
+		case KEY_F24: msg->code = SPR16_KEYCODE_F24; break;
+
+		/*case KEY_KPASTERISK: msg->code =  break;*/
+		/*case KEY_CAPSLOCK:   msg->code = shift ? '' : ''; break;*/
 
 
 		/* mouse buttons */
-		case BTN_MOUSE:   data->code = SPR16_KEYCODE_LBTN; break;
-		case BTN_RIGHT:   data->code = SPR16_KEYCODE_RBTN; break;
-		case BTN_MIDDLE:  data->code = SPR16_KEYCODE_ABTN; break;
-		case BTN_SIDE:    data->code = SPR16_KEYCODE_BBTN; break;
-		case BTN_EXTRA:   data->code = SPR16_KEYCODE_CBTN; break;
-		case BTN_FORWARD: data->code = SPR16_KEYCODE_DBTN; break;
-		case BTN_BACK:    data->code = SPR16_KEYCODE_EBTN; break;
-		case BTN_TASK:    data->code = SPR16_KEYCODE_FBTN; break;
+		case BTN_MOUSE:   msg->code = SPR16_KEYCODE_LBTN; break;
+		case BTN_RIGHT:   msg->code = SPR16_KEYCODE_RBTN; break;
+		case BTN_MIDDLE:  msg->code = SPR16_KEYCODE_ABTN; break;
+		case BTN_SIDE:    msg->code = SPR16_KEYCODE_BBTN; break;
+		case BTN_EXTRA:   msg->code = SPR16_KEYCODE_CBTN; break;
+		case BTN_FORWARD: msg->code = SPR16_KEYCODE_DBTN; break;
+		case BTN_BACK:    msg->code = SPR16_KEYCODE_EBTN; break;
+		case BTN_TASK:    msg->code = SPR16_KEYCODE_FBTN; break;
 
 
 		/* chars <= 127 */
-		case KEY_ESC: data->code = 27; break;  /* ascii escape code */
-		case KEY_0: data->code = shift ? ')' : '0'; break;
-		case KEY_1: data->code = shift ? '!' : '1'; break;
-		case KEY_2: data->code = shift ? '@' : '2'; break;
-		case KEY_3: data->code = shift ? '#' : '3'; break;
-		case KEY_4: data->code = shift ? '$' : '4'; break;
-		case KEY_5: data->code = shift ? '%' : '5'; break;
-		case KEY_6: data->code = shift ? '^' : '6'; break;
-		case KEY_7: data->code = shift ? '&' : '7'; break;
-		case KEY_8: data->code = shift ? '*' : '8'; break;
-		case KEY_9: data->code = shift ? '(' : '9'; break;
+		case KEY_ESC: msg->code = 27; break;  /* ascii escape code */
+		case KEY_0: msg->code = shift ? ')' : '0'; break;
+		case KEY_1: msg->code = shift ? '!' : '1'; break;
+		case KEY_2: msg->code = shift ? '@' : '2'; break;
+		case KEY_3: msg->code = shift ? '#' : '3'; break;
+		case KEY_4: msg->code = shift ? '$' : '4'; break;
+		case KEY_5: msg->code = shift ? '%' : '5'; break;
+		case KEY_6: msg->code = shift ? '^' : '6'; break;
+		case KEY_7: msg->code = shift ? '&' : '7'; break;
+		case KEY_8: msg->code = shift ? '*' : '8'; break;
+		case KEY_9: msg->code = shift ? '(' : '9'; break;
 
-		case KEY_MINUS:      data->code = shift ? '_'  : '-' ; break;
-		case KEY_EQUAL:      data->code = shift ? '+'  : '=' ; break;
-		case KEY_BACKSPACE:  data->code = shift ? '\b' : '\b'; break;
-		case KEY_TAB:        data->code = shift ? '\t' : '\t'; break;
-		case KEY_LEFTBRACE:  data->code = shift ? '{'  : '[' ; break;
-		case KEY_RIGHTBRACE: data->code = shift ? '}'  : ']' ; break;
-		case KEY_ENTER:      data->code = shift ? '\n' : '\n'; break;
-		case KEY_SEMICOLON:  data->code = shift ? ':'  : ';' ; break;
-		case KEY_APOSTROPHE: data->code = shift ? '"'  : '\''; break;
-		case KEY_GRAVE:      data->code = shift ? '~'  : '`' ; break;
-		case KEY_BACKSLASH:  data->code = shift ? '|'  : '\\'; break;
-		case KEY_COMMA:      data->code = shift ? '<'  : ',' ; break;
-		case KEY_DOT:        data->code = shift ? '>'  : '.' ; break;
-		case KEY_SLASH:      data->code = shift ? '?'  : '/' ; break;
-		case KEY_SPACE:      data->code = shift ? ' '  : ' ' ; break;
+		case KEY_MINUS:      msg->code = shift ? '_'  : '-' ; break;
+		case KEY_EQUAL:      msg->code = shift ? '+'  : '=' ; break;
+		case KEY_BACKSPACE:  msg->code = shift ? '\b' : '\b'; break;
+		case KEY_TAB:        msg->code = shift ? '\t' : '\t'; break;
+		case KEY_LEFTBRACE:  msg->code = shift ? '{'  : '[' ; break;
+		case KEY_RIGHTBRACE: msg->code = shift ? '}'  : ']' ; break;
+		case KEY_ENTER:      msg->code = shift ? '\n' : '\n'; break;
+		case KEY_SEMICOLON:  msg->code = shift ? ':'  : ';' ; break;
+		case KEY_APOSTROPHE: msg->code = shift ? '"'  : '\''; break;
+		case KEY_GRAVE:      msg->code = shift ? '~'  : '`' ; break;
+		case KEY_BACKSLASH:  msg->code = shift ? '|'  : '\\'; break;
+		case KEY_COMMA:      msg->code = shift ? '<'  : ',' ; break;
+		case KEY_DOT:        msg->code = shift ? '>'  : '.' ; break;
+		case KEY_SLASH:      msg->code = shift ? '?'  : '/' ; break;
+		case KEY_SPACE:      msg->code = shift ? ' '  : ' ' ; break;
 
-		case KEY_A: data->code = shift ? 'A' : 'a'; break;
-		case KEY_B: data->code = shift ? 'B' : 'b'; break;
-		case KEY_C: data->code = shift ? 'C' : 'c'; break;
-		case KEY_D: data->code = shift ? 'D' : 'd'; break;
-		case KEY_E: data->code = shift ? 'E' : 'e'; break;
-		case KEY_F: data->code = shift ? 'F' : 'f'; break;
-		case KEY_G: data->code = shift ? 'G' : 'g'; break;
-		case KEY_H: data->code = shift ? 'H' : 'h'; break;
-		case KEY_I: data->code = shift ? 'I' : 'i'; break;
-		case KEY_J: data->code = shift ? 'J' : 'j'; break;
-		case KEY_K: data->code = shift ? 'K' : 'k'; break;
-		case KEY_L: data->code = shift ? 'L' : 'l'; break;
-		case KEY_M: data->code = shift ? 'M' : 'm'; break;
-		case KEY_N: data->code = shift ? 'N' : 'n'; break;
-		case KEY_O: data->code = shift ? 'O' : 'o'; break;
-		case KEY_P: data->code = shift ? 'P' : 'p'; break;
-		case KEY_Q: data->code = shift ? 'Q' : 'q'; break;
-		case KEY_R: data->code = shift ? 'R' : 'r'; break;
-		case KEY_S: data->code = shift ? 'S' : 's'; break;
-		case KEY_T: data->code = shift ? 'T' : 't'; break;
-		case KEY_U: data->code = shift ? 'U' : 'u'; break;
-		case KEY_V: data->code = shift ? 'V' : 'v'; break;
-		case KEY_W: data->code = shift ? 'W' : 'w'; break;
-		case KEY_X: data->code = shift ? 'X' : 'x'; break;
-		case KEY_Y: data->code = shift ? 'Y' : 'Y'; break;
-		case KEY_Z: data->code = shift ? 'Z' : 'z'; break;
+		case KEY_A: msg->code = shift ? 'A' : 'a'; break;
+		case KEY_B: msg->code = shift ? 'B' : 'b'; break;
+		case KEY_C: msg->code = shift ? 'C' : 'c'; break;
+		case KEY_D: msg->code = shift ? 'D' : 'd'; break;
+		case KEY_E: msg->code = shift ? 'E' : 'e'; break;
+		case KEY_F: msg->code = shift ? 'F' : 'f'; break;
+		case KEY_G: msg->code = shift ? 'G' : 'g'; break;
+		case KEY_H: msg->code = shift ? 'H' : 'h'; break;
+		case KEY_I: msg->code = shift ? 'I' : 'i'; break;
+		case KEY_J: msg->code = shift ? 'J' : 'j'; break;
+		case KEY_K: msg->code = shift ? 'K' : 'k'; break;
+		case KEY_L: msg->code = shift ? 'L' : 'l'; break;
+		case KEY_M: msg->code = shift ? 'M' : 'm'; break;
+		case KEY_N: msg->code = shift ? 'N' : 'n'; break;
+		case KEY_O: msg->code = shift ? 'O' : 'o'; break;
+		case KEY_P: msg->code = shift ? 'P' : 'p'; break;
+		case KEY_Q: msg->code = shift ? 'Q' : 'q'; break;
+		case KEY_R: msg->code = shift ? 'R' : 'r'; break;
+		case KEY_S: msg->code = shift ? 'S' : 's'; break;
+		case KEY_T: msg->code = shift ? 'T' : 't'; break;
+		case KEY_U: msg->code = shift ? 'U' : 'u'; break;
+		case KEY_V: msg->code = shift ? 'V' : 'v'; break;
+		case KEY_W: msg->code = shift ? 'W' : 'w'; break;
+		case KEY_X: msg->code = shift ? 'X' : 'x'; break;
+		case KEY_Y: msg->code = shift ? 'Y' : 'Y'; break;
+		case KEY_Z: msg->code = shift ? 'Z' : 'z'; break;
 
 		default: return -1;
 	}
@@ -240,11 +259,16 @@ static int evdev_translate_keycode(struct input_device *dev,
 }
 
 /*
- *  prevent vt switching keys from being sent
+ *  prevent vt switching keys from being sent to clients
+ *  ctrl-alt-tab cycle through screens
  *  raise sigterm on ctrl-alt-escape
  */
-static int preempt_keycodes(struct input_device *self, struct spr16_msgdata_input *msg)
+int preempt_keycodes(struct input_device *self, struct spr16_msgdata_input *msg)
 {
+	/* only care about keydown */
+	if (msg->val != 1)
+		return 0;
+
 	switch (msg->code)
 	{
 	case SPR16_KEYCODE_F1:
@@ -285,23 +309,12 @@ static int preempt_keycodes(struct input_device *self, struct spr16_msgdata_inpu
 			return 1;
 		}
 		break;
-
-	case SPR16_KEYCODE_LALT:
-		if (msg->val == 0) { /* down */
-			if (self->keyflags & SPR16_KEYMOD_LALT)
-				self->keyflags &= ~SPR16_KEYMOD_LALT;
-		}
-		else if (msg->val == 1) { /* up */
-			self->keyflags |= SPR16_KEYMOD_LALT;
-		}
-		break;
-	case SPR16_KEYCODE_LCTRL:
-		if (msg->val == 0) { /* down */
-			if (self->keyflags & SPR16_KEYMOD_LCTRL)
-				self->keyflags &= ~SPR16_KEYMOD_LCTRL;
-		}
-		else if (msg->val == 1) { /* up */
-			self->keyflags |= SPR16_KEYMOD_LCTRL;
+	case '\t':
+		if ((self->keyflags & (SPR16_KEYMOD_LALT | SPR16_KEYMOD_LCTRL))
+				   == (SPR16_KEYMOD_LALT | SPR16_KEYMOD_LCTRL)) {
+			if (self->func_hotkey)
+				self->func_hotkey(SPR16_HOTKEY_NEXTSCREEN, NULL);
+			return 1;
 		}
 		break;
 
@@ -312,11 +325,12 @@ static int preempt_keycodes(struct input_device *self, struct spr16_msgdata_inpu
 }
 
 
+
 /* TODO SYN_DROPPED!! also hardware repeats are getting ignored by Xorg
  * also, we probably want to EVIOCGRAB, is that essentially locking the device?
  * */
 #define EV_BUF ((EV_MAX+1)*2)
-static int read_evdev(struct input_device *self, int client)
+static int transceive_evdev(struct input_device *self, int client)
 {
 	struct input_event events[EV_BUF];
 	unsigned int i;
@@ -540,6 +554,7 @@ static struct prospective_path *find_most_capable(int cap_class)
 			break;
 		case CAP_AXIS:
 			break;
+		/* TODO touchpads */
 		case CAP_TOUCH:
 			break;
 		case CAP_FEEDBACK:
@@ -562,10 +577,11 @@ err_close:
 	return NULL;
 }
 
+
 /*
  * TODO, check for duplicates, EVIOCGRAB or use owner/group
  */
-static int evdev_instantiate(struct input_device **device_list,
+int evdev_instantiate(struct input_device **device_list,
 				int epoll_fd, char *devpath)
 {
 	struct epoll_event ev;
@@ -594,7 +610,7 @@ static int evdev_instantiate(struct input_device **device_list,
 	snprintf(dev->name, sizeof(dev->name), "%s", devname);
 	snprintf(dev->path, sizeof(dev->path), "%s", devpath);
 	dev->fd = devfd;
-	dev->func_read  = read_evdev;
+	dev->func_transceive  = transceive_evdev;
 	dev->func_flush = generic_flush;
 	dev->next = *device_list;
 	*device_list = dev;
@@ -637,12 +653,12 @@ static void load_stream(struct input_device **device_list, int epoll_fd,
 	dev->fd = streamfd;
 	if (mode == 1) {
 		snprintf(dev->name, sizeof(dev->name), "ascii-stream");
-		dev->func_read  = read_ascii;
+		dev->func_transceive  = transceive_ascii;
 		dev->func_flush = generic_flush;
 	}
 	else {
 		snprintf(dev->name, sizeof(dev->name), "raw-stream");
-		dev->func_read  = read_raw;
+		dev->func_transceive  = transceive_raw;
 		dev->func_flush = generic_flush;
 	}
 	dev->next = *device_list;
@@ -650,7 +666,7 @@ static void load_stream(struct input_device **device_list, int epoll_fd,
 }
 
 void load_linux_input_drivers(struct input_device **device_list,
-		int epoll_fd, int stdin_mode, int evdev)
+		int epoll_fd, int stdin_mode, int evdev, input_hotkey hk)
 {
 
 	/* ascii */
@@ -673,6 +689,7 @@ void load_linux_input_drivers(struct input_device **device_list,
 				printf("evdev instantiate kbd failed %s\n", prp->path);
 			}
 			else {
+				(*device_list)->func_hotkey = hk;
 				printf("using keyboard: %s\n", prp->path);
 			}
 		}

@@ -16,9 +16,9 @@
 
 #define STRERR strerror(errno)
 
-#define MAX_MSGBUF_READ (512 - SPRITE_MAXMSGLEN)
+#define MAX_MSGBUF_READ (512 - SPR16_MAXMSGLEN)
 #define MIN_MSGBUF_READ (sizeof(struct spr16_msghdr)+2)
-char g_msgbuf[MAX_MSGBUF_READ+SPRITE_MAXMSGLEN];
+char g_msgbuf[MAX_MSGBUF_READ+SPR16_MAXMSGLEN];
 static void print_bytes(char *buf, const uint16_t len)
 {
 	int i;
@@ -53,7 +53,7 @@ uint32_t get_msghdr_typelen(struct spr16_msghdr *hdr)
 int spr16_write_msg(int fd, struct spr16_msghdr *hdr,
 		void *msgdata, size_t msgdata_len)
 {
-	char msg[SPRITE_MAXMSGLEN];
+	char msg[SPR16_MAXMSGLEN];
 	unsigned int intr_count = 0;
 	hdr->id = 0;
 	memcpy(msg, hdr, sizeof(*hdr));
@@ -93,7 +93,7 @@ static int spr16_reassemble_fragment(int fd)
 	{
 		fragpos = g_msgbuf+rdpos;
 		typelen = get_msghdr_typelen((struct spr16_msghdr *)fragpos);
-		if (typelen > SPRITE_MAXMSGLEN - sizeof(struct spr16_msghdr)) {
+		if (typelen > SPR16_MAXMSGLEN - sizeof(struct spr16_msghdr)) {
 			errno = EPROTO;
 			return -1;
 		}
@@ -116,7 +116,7 @@ static int spr16_reassemble_fragment(int fd)
 
 	/* continue with 2'nd read */
 	bytesleft = msglen-fragbytes;
-	if (bytesleft <= 0 || bytesleft+fragbytes > SPRITE_MAXMSGLEN) {
+	if (bytesleft <= 0 || bytesleft+fragbytes > SPR16_MAXMSGLEN) {
 		errno = EPROTO;
 		return -1;
 	}
@@ -189,7 +189,7 @@ int spr16_dispatch_msgs(int fd, char *msgbuf, uint32_t buflen)
 		msghdr  = (struct spr16_msghdr *)msgpos;
 		msgdata = msgpos+sizeof(struct spr16_msghdr);
 		typelen = get_msghdr_typelen(msghdr);
-		if (typelen > SPRITE_MAXMSGLEN - sizeof(struct spr16_msghdr)
+		if (typelen > SPR16_MAXMSGLEN - sizeof(struct spr16_msghdr)
 				|| msgdata+typelen > msgbuf+buflen) {
 			errno = EPROTO;
 			return -1;
