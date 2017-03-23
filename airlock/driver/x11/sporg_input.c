@@ -63,8 +63,12 @@
 #define STRERR strerror(errno)
 
 
-/* how to generalize valuators... */
-#define CURSOR_AXES 3
+enum {
+	CURSOR_X = 0,
+	CURSOR_Y,
+	CURSOR_Z,
+	CURSOR_COUNT
+};
 ValuatorMask *g_cursor;
 
 /******************************************************************************
@@ -227,7 +231,7 @@ static void sporg_ascii_mode(InputInfoPtr info, struct spr16_msgdata_input *msg)
 	}
 }
 
-/* TODO user defined acceleration, and scroll wheel */
+/* TODO user defined acceleration */
 static void axis_relative_accumulate(struct spr16_msgdata_input *msg)
 {
 	int val;
@@ -239,6 +243,19 @@ static void axis_relative_accumulate(struct spr16_msgdata_input *msg)
 		val = valuator_mask_get(g_cursor, REL_Y) + msg->val;
 		valuator_mask_set(g_cursor, REL_Y, val);
 	}
+	else if (msg->code == REL_WHEEL) {
+		val = -msg->val;
+		valuator_mask_set(g_cursor, CURSOR_Z, val);
+	}
+	/* both horizontal?
+	 * else if (msg->code == REL_DIAL) {
+		val = valuator_mask_get(g_cursor, REL_Y) + msg->val;
+		valuator_mask_set(g_cursor, REL_Y, val);
+	}
+	else if (msg->code == REL_HWHEEL) {
+		val = valuator_mask_get(g_cursor, REL_Y) + msg->val;
+		valuator_mask_set(g_cursor, REL_Y, val);
+	}*/
 }
 static void axis_relative_post(InputInfoPtr info)
 {
@@ -339,10 +356,11 @@ static int xf86VoidControlProc(DeviceIntPtr device, int what)
 	unsigned char i;
 	Bool result;
 	Atom btn_labels[MAXBUTTONS] = {0};
-	Atom axes_labels[2] = {0};
+	Atom axes_labels[CURSOR_COUNT] = {0};
 
 	axes_labels[0] = XIGetKnownProperty(AXIS_LABEL_PROP_ABS_X);
 	axes_labels[1] = XIGetKnownProperty(AXIS_LABEL_PROP_ABS_Y);
+	axes_labels[2] = XIGetKnownProperty(AXIS_LABEL_PROP_REL_WHEEL);
 
 	btn_labels[0] = XIGetKnownProperty(BTN_LABEL_PROP_BTN_LEFT);
 	btn_labels[1] = XIGetKnownProperty(BTN_LABEL_PROP_BTN_MIDDLE);
@@ -375,22 +393,24 @@ static int xf86VoidControlProc(DeviceIntPtr device, int what)
 			}
 
 			if (InitValuatorClassDeviceStruct(device,
-						2,
+						CURSOR_COUNT,
 						axes_labels,
 						0,
 						Absolute) == FALSE) {
 				InitValuatorAxisStruct(device,
-						0,
+						CURSOR_X,
 						axes_labels[0],
-						0, /* min val */1, /* max val */
+						0, /* min val */
+						1, /* max val */
 						1, /* resolution */
 						0, /* min_res */
 						1, /* max_res */
 						Absolute);
 				InitValuatorAxisStruct(device,
-						1,
+						CURSOR_Y,
 						axes_labels[1],
-						0, /* min val */1, /* max val */
+						0, /* min val */
+						1, /* max val */
 						1, /* resolution */
 						0, /* min_res */
 						1, /* max_res */
@@ -398,10 +418,24 @@ static int xf86VoidControlProc(DeviceIntPtr device, int what)
 				ErrorF("unable to allocate Valuator class device\n");
 				return -1;
 			}
-			else {
-				/* allocate the motion history buffer if needed */
-				xf86MotionHistoryAllocate(pInfo);
-			}
+
+			/* vscroll */
+			InitValuatorAxisStruct(device,
+					CURSOR_Z,
+					axes_labels[CURSOR_Z],
+					NO_AXIS_LIMITS, /* min val */
+					NO_AXIS_LIMITS, /* max val */
+					0, /* resolution */
+					0, /* min_res */
+					0, /* max_res */
+					Relative);
+			SetScrollValuator(device,
+					CURSOR_Z,
+					SCROLL_TYPE_VERTICAL,
+					1.0,
+					SCROLL_FLAG_NONE);
+
+			xf86MotionHistoryAllocate(pInfo);
 			if (InitPtrFeedbackClassDeviceStruct(device,
 						PointerControlProc) == FALSE) {
 				ErrorF("unable to init pointer feedback class device\n");
@@ -461,7 +495,7 @@ static int xf86VoidInit(InputDriverPtr drv, InputInfoPtr pInfo,	int flags)
 		return -1;
 	}
 	fprintf(stderr, "--------------------------------------------------\n");
-	fprintf(stderr, "- sporg input init ------------------------------\n");
+	fprintf(stderr, "- sporg input init -------------------------------\n");
 	fprintf(stderr, "--------------------------------------------------\n");
 
 	/* Initialise the InputInfoRec. */
@@ -473,7 +507,7 @@ static int xf86VoidInit(InputDriverPtr drv, InputInfoPtr pInfo,	int flags)
 	pInfo->fd = input_read_fd; /* read end (needs O_ASYNC) */
 
 	/* cursor */
-	g_cursor = valuator_mask_new(CURSOR_AXES);
+	g_cursor = valuator_mask_new(CURSOR_COUNT);
 	if (g_cursor == NULL) {
 		fprintf(stderr, "valuator_mask_new: %s\n", STRERR);
 		return -1;

@@ -379,9 +379,14 @@ interrupted:
 
 		break;
 		case EV_REL:
+			/* TODO , erhmaghad stop using evdev's #defines */
 			data.type = SPR16_INPUT_AXIS_RELATIVE;
 			data.code = event->code;
 			data.val  = event->value;
+		break;
+		case EV_ABS:
+			printf("TODO: input absolute pointer\n");
+			continue;
 		break;
 		default:
 			continue;
@@ -426,8 +431,8 @@ static int bit_count(unsigned long bits[], unsigned int nlongs)
 
 /*
  * may not always get you the right device, use env var to specify exact device
- * export EVDEV_KEYBOARD=/dev/input/event1
- * export EVDEV_MOUSE=/dev/input/event0
+ * export EVDEV_KEYBOARD=event1
+ * export EVDEV_MOUSE=event0
  * etc...
  */
 struct prospective_path {
@@ -442,6 +447,8 @@ static void select_prp(struct prospective_path *p, char *path, unsigned int key,
 	p->rel = rel;
 	p->abs = abs;
 	p->ff  = ff;
+	printf("prospective input device: %s\n", path);
+	printf("key(%d) rel(%d) abs(%d) ff(%d)\n", key, rel, abs, ff);
 }
 
 static struct prospective_path *check_environ(int cap_class)
@@ -461,8 +468,10 @@ static struct prospective_path *check_environ(int cap_class)
 	}
 	if (e == NULL)
 		return NULL;
-	if (strncmp(e, "event", 5) != 0)
+	if (strncmp(e, "event", 5) != 0) {
+		printf("EVDEV env var should be the device name, e.g: event1\n");
 		return NULL;
+	}
 	snprintf(g_prospect.path, sizeof(g_prospect.path), "%s/%s", devdir, e);
 	return &g_prospect;
 }
@@ -706,6 +715,7 @@ void load_linux_input_drivers(struct input_device **device_list,
 				printf("using mouse: %s\n", prp->path);
 			}
 		}
+
 	}
 }
 
