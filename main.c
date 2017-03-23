@@ -26,6 +26,7 @@
 #include "protocol/spr16.h"
 #define STRERR strerror(errno)
 
+struct server g_server;
 struct drm_state g_state;
 sig_atomic_t g_running;
 
@@ -94,6 +95,29 @@ int exec_loop(int tty)
 	return 0;
 }
 
+int read_environ()
+{
+	char *vscroll = NULL;
+	char *err = NULL;
+	int vscroll_amount = 1;
+
+	vscroll = getenv("SPR16_VSCROLL");
+	if (vscroll != NULL) {
+		errno = 0;
+		vscroll_amount = strtol(vscroll, &err, 10);
+		if (err == NULL || *err || errno || vscroll_amount == 0) {
+			fprintf(stderr, "errnoenous environ SPR16_VSCROLL\n");
+				return -1;
+		}
+		if (vscroll_amount < -50)
+			vscroll_amount = -50;
+		else if (vscroll_amount > 50)
+			vscroll_amount = 50;
+		g_server.vscroll_amount = vscroll_amount;
+	}
+	return 0;
+}
+
 int main()
 {
 	struct simple_drmbuffer *sfb = NULL;
@@ -107,6 +131,11 @@ int main()
 
 	g_running = 1;
 	memset(&g_state, 0, sizeof(g_state));
+	memset(&g_server, 0, sizeof(g_server));
+	g_server.vscroll_amount = 2;
+
+	if (read_environ())
+		return -1;
 
 	/* line buffer output */
 	setvbuf(stdout, NULL, _IOLBF, 0);

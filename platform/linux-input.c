@@ -24,6 +24,8 @@
 /* number of longs needed to represent n bits. */
 #define NLONGS(n) ((n + (sizeof(long) * 8)) - 1 / sizeof(long))
 
+extern struct server g_server;
+
 const char devpfx[] = "event";
 const char devdir[] = "/dev/input";
 
@@ -383,6 +385,9 @@ interrupted:
 			data.type = SPR16_INPUT_AXIS_RELATIVE;
 			data.code = event->code;
 			data.val  = event->value;
+			if (data.code == REL_WHEEL) {
+				data.val *= g_server.vscroll_amount;
+			}
 		break;
 		case EV_ABS:
 			printf("TODO: input absolute pointer\n");
@@ -677,7 +682,6 @@ static void load_stream(struct input_device **device_list, int epoll_fd,
 void load_linux_input_drivers(struct input_device **device_list,
 		int epoll_fd, int stdin_mode, int evdev, input_hotkey hk)
 {
-
 	/* ascii */
 	if (stdin_mode == 1) {
 		load_stream(device_list, epoll_fd, STDIN_FILENO, 1);

@@ -735,7 +735,6 @@ static int main_screen_switch(int scrn)
 	/* next */
 	if (scrn == -1) {
 		if (g_main_screen->next == NULL) {
-			printf("no next\n");
 			return 0;
 		}
 		oldmain = tmp = g_main_screen;
@@ -746,7 +745,6 @@ static int main_screen_switch(int scrn)
 		}
 		tmp->next = oldmain;
 		oldmain->next = NULL;
-		printf("scrn_next\n");
 	}
 	else if (scrn == -2) { /* prev */
 

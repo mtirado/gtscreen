@@ -261,6 +261,11 @@ int spr16_client_set_servinfo_handler(servinfo_handler func);
 /*----------------------------------------------*
  * server side                                  *
  *----------------------------------------------*/
+struct server
+{
+	/* TODO sweep up common global clutter here */
+	int vscroll_amount;
+};
 struct client
 {
 	struct spr16 sprite;
