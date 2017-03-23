@@ -159,6 +159,24 @@ static int evdev_translate_keycode(struct input_device *self,
 		case KEY_INSERT:     msg->code = SPR16_KEYCODE_INSERT;   break;
 		case KEY_DELETE:     msg->code = SPR16_KEYCODE_DELETE;   break;
 
+		case KEY_NUMLOCK:     msg->code = SPR16_KEYCODE_NUMLOCK;    break;
+		case KEY_KP0:         msg->code = SPR16_KEYCODE_NP0;        break;
+		case KEY_KP1:         msg->code = SPR16_KEYCODE_NP1;        break;
+		case KEY_KP2:         msg->code = SPR16_KEYCODE_NP2;        break;
+		case KEY_KP3:         msg->code = SPR16_KEYCODE_NP3;        break;
+		case KEY_KP4:         msg->code = SPR16_KEYCODE_NP4;        break;
+		case KEY_KP5:         msg->code = SPR16_KEYCODE_NP5;        break;
+		case KEY_KP6:         msg->code = SPR16_KEYCODE_NP6;        break;
+		case KEY_KP7:         msg->code = SPR16_KEYCODE_NP7;        break;
+		case KEY_KP8:         msg->code = SPR16_KEYCODE_NP8;        break;
+		case KEY_KP9:         msg->code = SPR16_KEYCODE_NP9;        break;
+		case KEY_KPSLASH:     msg->code = SPR16_KEYCODE_NPSLASH;    break;
+		case KEY_KPASTERISK:  msg->code = SPR16_KEYCODE_NPASTERISK; break;
+		case KEY_KPPLUS:      msg->code = SPR16_KEYCODE_NPPLUS;     break;
+		case KEY_KPMINUS:     msg->code = SPR16_KEYCODE_NPMINUS;    break;
+		case KEY_KPDOT:       msg->code = SPR16_KEYCODE_NPDOT;      break;
+		case KEY_KPENTER:     msg->code = SPR16_KEYCODE_NPENTER;    break;
+
 		case KEY_F1:  msg->code = SPR16_KEYCODE_F1;  break;
 		case KEY_F2:  msg->code = SPR16_KEYCODE_F2;  break;
 		case KEY_F3:  msg->code = SPR16_KEYCODE_F3;  break;

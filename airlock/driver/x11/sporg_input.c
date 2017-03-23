@@ -121,6 +121,23 @@ static uint32_t to_x11(uint16_t k_c)
 		case SPR16_KEYCODE_END:		return XK_End;
 		case SPR16_KEYCODE_INSERT:	return XK_Insert;
 		case SPR16_KEYCODE_DELETE:	return XK_Delete;
+		case SPR16_KEYCODE_NP0:		return XK_KP_0;
+		case SPR16_KEYCODE_NP1:         return XK_KP_1;
+		case SPR16_KEYCODE_NP2:         return XK_KP_2;
+		case SPR16_KEYCODE_NP3:         return XK_KP_3;
+		case SPR16_KEYCODE_NP4:         return XK_KP_4;
+		case SPR16_KEYCODE_NP5:         return XK_KP_5;
+		case SPR16_KEYCODE_NP6:         return XK_KP_6;
+		case SPR16_KEYCODE_NP7:         return XK_KP_7;
+		case SPR16_KEYCODE_NP8:         return XK_KP_8;
+		case SPR16_KEYCODE_NP9:         return XK_KP_9;
+		case SPR16_KEYCODE_NPSLASH:     return XK_KP_Divide;
+		case SPR16_KEYCODE_NPASTERISK:  return XK_KP_Multiply;
+		case SPR16_KEYCODE_NPPLUS:      return XK_KP_Add;
+		case SPR16_KEYCODE_NPMINUS:     return XK_KP_Subtract;
+		case SPR16_KEYCODE_NPDOT:       return XK_KP_Decimal;
+		case SPR16_KEYCODE_NPENTER:     return XK_KP_Enter;
+		case SPR16_KEYCODE_NUMLOCK:	return XK_Num_Lock;
 		case SPR16_KEYCODE_F1:		return XK_F1;
 		case SPR16_KEYCODE_F2:		return XK_F2;
 		case SPR16_KEYCODE_F3:		return XK_F3;
@@ -397,24 +414,6 @@ static int xf86VoidControlProc(DeviceIntPtr device, int what)
 						axes_labels,
 						0,
 						Absolute) == FALSE) {
-				InitValuatorAxisStruct(device,
-						CURSOR_X,
-						axes_labels[0],
-						0, /* min val */
-						1, /* max val */
-						1, /* resolution */
-						0, /* min_res */
-						1, /* max_res */
-						Absolute);
-				InitValuatorAxisStruct(device,
-						CURSOR_Y,
-						axes_labels[1],
-						0, /* min val */
-						1, /* max val */
-						1, /* resolution */
-						0, /* min_res */
-						1, /* max_res */
-						Absolute);
 				ErrorF("unable to allocate Valuator class device\n");
 				return -1;
 			}
