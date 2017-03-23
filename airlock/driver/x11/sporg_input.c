@@ -491,7 +491,7 @@ static int xf86VoidInit(InputDriverPtr drv, InputInfoPtr pInfo,	int flags)
 	errno = 0;
 	input_read_fd = strtol(fdnum, &err, 10);
 	if (err == NULL || *err || errno || input_read_fd < 0) {
-		fprintf(stderr, "errnoenous input fdnum\n");
+		fprintf(stderr, "erroneous input fdnum\n");
 		return -1;
 	}
 	fprintf(stderr, "--------------------------------------------------\n");

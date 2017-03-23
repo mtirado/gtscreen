@@ -106,7 +106,7 @@ int read_environ()
 		errno = 0;
 		vscroll_amount = strtol(vscroll, &err, 10);
 		if (err == NULL || *err || errno || vscroll_amount == 0) {
-			fprintf(stderr, "errnoenous environ SPR16_VSCROLL\n");
+			printf("erroneous environ SPR16_VSCROLL\n");
 				return -1;
 		}
 		if (vscroll_amount < -50)
