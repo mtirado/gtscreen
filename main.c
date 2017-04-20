@@ -258,6 +258,22 @@ free_ret:
 	return ret;
 }
 
+static void print_usage()
+{
+	printf("\n");
+	printf("usage: gtscreen <arguments>\n");
+	printf("\n");
+	printf("[arguments]\n");
+	printf("    --printmodes    print all connectors and modes\n");
+	printf("\n");
+	printf("[environment variables]\n");
+	printf("    SPR16_SCREEN_WIDTH        preferred screen width\n");
+	printf("    SPR16_SCREEN_HEIGHT       preferred screen height\n");
+	printf("    SPR16_SCREEN_REFRESH      target refresh rate\n");
+	printf("    SPR16_SCREEN_VSCROLL      vertical scroll(wheel) amount\n");
+	printf("\n");
+}
+
 int read_args(int argc, char *argv[])
 {
 	int i;
@@ -271,7 +287,7 @@ int read_args(int argc, char *argv[])
 			return -1;
 		}
 		else {
-			printf("unknown argument\n");
+			print_usage();
 			return -1;
 		}
 	}
