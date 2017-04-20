@@ -5,7 +5,7 @@
  */
 
 /*
- *  TODO: evdev support!!!
+ *  TODO: evdev SYN_DROPPED
  *  i'm fine with evqueue assuming EV_MAX*2 size (*2 accounts for syn_dropped)
  *
  */
@@ -78,7 +78,7 @@ int exec_loop(int tty)
 	}
 	(void)tty;
 
-	/* TODO turn off kbd if using evdev */
+	/* TODO turn off kbd if using evdev? */
 	if (spr16_server_init_input()) {
 		printf("input init failed\n");
 		return -1;
@@ -97,14 +97,17 @@ int exec_loop(int tty)
 
 int read_environ()
 {
-	char *vscroll = NULL;
+	char *estr = NULL;
 	char *err = NULL;
-	int vscroll_amount = 1;
+	int vscroll_amount   = 1;
+	uint16_t req_width   = 0;
+	uint16_t req_height  = 0;
+	uint16_t req_refresh = 60;
 
-	vscroll = getenv("SPR16_VSCROLL");
-	if (vscroll != NULL) {
+	estr = getenv("SPR16_VSCROLL");
+	if (estr != NULL) {
 		errno = 0;
-		vscroll_amount = strtol(vscroll, &err, 10);
+		vscroll_amount = strtol(estr, &err, 10);
 		if (err == NULL || *err || errno || vscroll_amount == 0) {
 			printf("erroneous environ SPR16_VSCROLL\n");
 				return -1;
@@ -113,9 +116,91 @@ int read_environ()
 			vscroll_amount = -50;
 		else if (vscroll_amount > 50)
 			vscroll_amount = 50;
-		g_server.vscroll_amount = vscroll_amount;
 	}
+
+	estr = getenv("SPR16_SCREEN_WIDTH");
+	if (estr != NULL) {
+		errno = 0;
+		req_width = strtol(estr, &err, 10);
+		if (err == NULL || *err || errno || req_width == 0) {
+			printf("erroneous environ SPR16_SCREEN_WIDTH\n");
+				return -1;
+		}
+		if (req_width < 256)
+			req_width = 256;
+	}
+	estr = getenv("SPR16_SCREEN_HEIGHT");
+	if (estr != NULL) {
+		errno = 0;
+		req_height = strtol(estr, &err, 10);
+		if (err == NULL || *err || errno || req_height == 0) {
+			printf("erroneous environ SPR16_SCREEN_HEIGHT\n");
+				return -1;
+		}
+		if (req_height < 128)
+			req_height = 128;
+	}
+	estr = getenv("SPR16_SCREEN_REFRESH");
+	if (estr != NULL) {
+		errno = 0;
+		req_refresh = strtol(estr, &err, 10);
+		if (err == NULL || *err || errno || req_refresh == 0) {
+			printf("erroneous environ SPR16_SCREEN_REFRESH\n");
+				return -1;
+		}
+	}
+
+	g_server.vscroll_amount  = vscroll_amount;
+	g_server.request_width   = req_width;
+	g_server.request_height  = req_height;
+	g_server.request_refresh = req_refresh;
 	return 0;
+}
+
+/* returns the closest <= match preference on width
+ * refresh is matched to closest value */
+static int get_mode_idx(struct drm_mode_modeinfo *modes,
+			uint16_t count,
+			uint16_t width,
+			uint16_t height,
+			uint16_t refresh)
+{
+	int i;
+	int pick = -1;
+	if (width == 0)
+		width = 0xffff;
+	if (height == 0)
+		height = 0xffff;
+	for (i = 0; i < count; ++i)
+	{
+		/*print_mode_modeinfo(&modes[i]);*/
+		if (modes[i].hdisplay > width || modes[i].vdisplay > height)
+			continue;
+		/* must divide evenly by 16 */
+		if (modes[i].hdisplay % 16 == 0) {
+			if (pick < 0) {
+				pick = i;
+				continue;
+			}
+			if (modes[i].hdisplay > modes[pick].hdisplay)
+				pick = i;
+			else if (modes[i].vdisplay > modes[pick].vdisplay)
+				pick = i;
+			else if (modes[i].hdisplay == modes[pick].hdisplay
+					&& modes[i].vdisplay == modes[pick].vdisplay) {
+				if (abs(refresh - modes[i].vrefresh)
+					  < abs(refresh - modes[pick].vrefresh)) {
+					pick = i;
+				}
+			}
+		}
+	}
+	if (pick < 0) {
+		printf("could not find any usable modes for (%dx%d@%dhz)\n",
+				width, height, refresh);
+		return -1;
+	}
+	return pick;
 }
 
 int main()
@@ -124,11 +209,13 @@ int main()
 	struct drm_mode_card_res *res = NULL;
 	struct drm_mode_get_connector *conn = NULL;
 	struct drm_mode_modeinfo *modes = NULL;
+	uint32_t mode_count;
+	uint32_t conn_id;
 	int card_fd;
 	int ret = 0;
 	uint32_t i;
 	int tty;
-
+	int idx = -1;
 	g_running = 1;
 	memset(&g_state, 0, sizeof(g_state));
 	memset(&g_server, 0, sizeof(g_server));
@@ -162,44 +249,55 @@ int main()
 	/* print connector info */
 	/*for (i = 0; i < res->count_connectors; ++i)*/
 	i = 0;
-	{
-		uint32_t mode_count = 0;
-		uint32_t conn_id = drm_get_id(res->connector_id_ptr, i);
-		conn = alloc_connector(card_fd, conn_id);
-		if (!conn) {
-			printf("unable to create drm structure\n");
-			ret = -1;
-			goto free_ret;
-		}
-		/*printf("--- Connector %d --------------------------\n", conn_id);
-		print_connector(conn);*/
+	mode_count = 0;
+	conn_id = drm_get_id(res->connector_id_ptr, i);
+	conn = alloc_connector(card_fd, conn_id);
+	if (!conn) {
+		printf("unable to create drm structure\n");
+		ret = -1;
+		goto free_ret;
+	}
+	/*printf("--- Connector %d --------------------------\n", conn_id);
+	print_connector(conn);*/
 
-		printf("creating simple framebuffer\n");
-		/* choose a mode TODO make a mode hint picker thingy */
-		modes = get_connector_modeinfo(conn, &mode_count);
-		sfb = alloc_sfb(card_fd, modes[0].hdisplay, modes[0].vdisplay, 24, 32);
-		if (!sfb) {
-			ret = -1;
-			goto free_ret;
-		}
+	modes = get_connector_modeinfo(conn, &mode_count);
+	idx = get_mode_idx(modes, mode_count,
+			g_server.request_width,
+			g_server.request_height,
+			g_server.request_refresh);
+	if (idx < 0)
+		goto free_ret;
 
-		if (connect_sfb(card_fd, conn, &modes[0], sfb) == -1) {
-			ret = -1;
-			/*free_connector(conn); */
-			goto free_ret;
-		}
+	printf("using mode[%d] (%dx%d@%dhz)\n",	idx,
+			modes[idx].hdisplay,
+			modes[idx].vdisplay,
+			modes[idx].vrefresh);
+
+	/* buffer pitch must divide evenly by 16,
+	 * check against bpp here when that is variable */
+	sfb = alloc_sfb(card_fd, modes[idx].hdisplay, modes[idx].vdisplay, 24, 32);
+	if (!sfb) {
+		ret = -1;
+		goto free_ret;
+	}
+
+	if (connect_sfb(card_fd, conn, &modes[idx], sfb) == -1) {
+		ret = -1;
+		/*free_connector(conn); */
+		goto free_ret;
 	}
 
 	g_state.card_fd = card_fd;
 	g_state.conn    = conn;
 	g_state.sfb     = sfb;
-	g_state.conn_modeidx = 0;
+	g_state.conn_modeidx = idx;
 	/* drmstate must be set before any SIGUSR1/2's might be sent! */
 	drm_set_state(&g_state);
 	/*if (card_drop_master(card_fd)) {
 		ret = -1;
 		goto free_ret;
 	}*/
+
 	tty = 0;
 	/*K_XLATE, or K_MEDIUMRAW for keycodes, RAW is 8 bits*/
 	if (vt_init(tty, K_XLATE)) {
@@ -209,9 +307,7 @@ int main()
 		return -1;
 	}
 	sig_setup();
-
 	ret = exec_loop(tty);
-
 	destroy_sfb(card_fd, sfb);
 free_ret:
 	/* TODO general cleanup function that loops through resources on a card */

@@ -281,6 +281,9 @@ int spr16_client_set_servinfo_handler(servinfo_handler func);
 struct server
 {
 	/* TODO sweep up common global clutter here */
+	uint16_t request_width;
+	uint16_t request_height;
+	uint16_t request_refresh;
 	int vscroll_amount;
 };
 struct client

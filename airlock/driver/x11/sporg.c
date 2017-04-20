@@ -326,7 +326,7 @@ static int init_faux_hw(ScrnInfoPtr pScrn)
 	GDevPtr device;
 
 	device = xf86GetEntityInfo(pScrn->entityList[0])->device;
-	device->videoRam = 32000; /* being lazy XXX */
+	device->videoRam = 32000; /* 32MB TODO how to read this from .conf? */
 	/* TODO
 	 * set exact device ram instead of wasting space
 	 * */
@@ -345,16 +345,16 @@ static int init_faux_hw(ScrnInfoPtr pScrn)
 
 	i = xf86ValidateModes(pScrn,
 				pScrn->monitor->Modes,
-				pScrn->display->modes,
+				0,
 				clock_ranges,
 				NULL,
 				256,
 				g_servinfo.width,
-				(8 * pScrn->bitsPerPixel),
+				(16 * pScrn->bitsPerPixel),
 				128,
 				g_servinfo.height,
-				g_servinfo.width,
-				g_servinfo.height,
+				0,
+				0,
 				pScrn->videoRam * 1024,
 				LOOKUP_BEST_REFRESH);
 	if (i == -1) {
@@ -368,13 +368,15 @@ static int init_faux_hw(ScrnInfoPtr pScrn)
 	}
 
 	xf86SetCrtcForModes(pScrn, 0);
-    	/* Set the current mode to the first in the list */
-    	pScrn->currentMode = pScrn->modes;
-	xf86PrintModes(pScrn);
+	/*xf86PrintModes(pScrn);*/
 	if (pScrn->modes == NULL) {
 		xf86DrvMsg(pScrn->scrnIndex, X_ERROR, "No modes.\n");
 		return -1;
 	}
+	pScrn->currentMode = pScrn->modes;
+
+	/* Set display resolution */
+	xf86SetDpi(pScrn, 0, 0);
 	return 0;
 }
 
@@ -456,9 +458,6 @@ static Bool PreInit(ScrnInfoPtr pScrn, int flags)
 		fprintf(stderr, "init_faux_hw fail\n");
 		return FALSE;
 	}
-
-	/* Set display resolution */
-	xf86SetDpi(pScrn, 0, 0);
 
 	/* Load the required sub modules */
 	if (!xf86LoadSubModule(pScrn, "fb")) {
