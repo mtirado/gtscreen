@@ -173,7 +173,6 @@ static int get_mode_idx(struct drm_mode_modeinfo *modes,
 		height = 0xffff;
 	for (i = 0; i < count; ++i)
 	{
-		/*print_mode_modeinfo(&modes[i]);*/
 		if (modes[i].hdisplay > width || modes[i].vdisplay > height)
 			continue;
 		/* must divide evenly by 16 */
@@ -203,7 +202,83 @@ static int get_mode_idx(struct drm_mode_modeinfo *modes,
 	return pick;
 }
 
-int main()
+static int print_modes()
+{
+	struct drm_mode_card_res *res = NULL;
+	struct drm_mode_get_connector *conn = NULL;
+	struct drm_mode_modeinfo *modes = NULL;
+	uint32_t mode_count;
+	int card_fd;
+	int ret = 0;
+	uint32_t i;
+
+	card_fd = open("/dev/dri/card0", O_RDWR|O_CLOEXEC);
+	if (card_fd == -1) {
+		printf("open /dev/dri/card0: %s\n", STRERR);
+		return -1;
+	}
+
+	res = alloc_mode_card_res(card_fd);
+	if (!res) {
+		printf("unable to create drm structure\n");
+		ret = -1;
+		goto free_ret;
+	}
+
+	printf("--- Card 0 Resources ----------------------\n");
+	print_mode_card_resources(res);
+	for (i = 0; i < res->count_connectors; ++i)
+	{
+		uint32_t conn_id;
+		uint32_t z;
+		mode_count = 0;
+		conn_id = drm_get_id(res->connector_id_ptr, i);
+		conn = alloc_connector(card_fd, conn_id);
+		if (!conn) {
+			printf("unable to create drm structure\n");
+			ret = -1;
+			goto free_ret;
+		}
+		printf("--- Connector %d --------------------------\n", conn_id);
+		print_connector(conn);
+		modes = get_connector_modeinfo(conn, &mode_count);
+		printf("Modes: %d\n", mode_count);
+		for (z = 0; z < mode_count; ++z)
+		{
+			printf("    [%d] %dx%d@%dhz\n", z,
+					modes[z].hdisplay,
+					modes[z].vdisplay,
+					modes[z].vrefresh);
+		}
+	}
+free_ret:
+	free_connector(conn);
+	free_mode_card_res(res);
+	close(card_fd);
+	return ret;
+}
+
+int read_args(int argc, char *argv[])
+{
+	int i;
+	if (argc <= 1)
+		return 0;
+	for (i = 1; i < argc; ++i)
+	{
+		if (strncmp("--printmodes", argv[i], 13) == 0) {
+			print_modes();
+			_exit(0);
+			return -1;
+		}
+		else {
+			printf("unknown argument\n");
+			return -1;
+		}
+	}
+	return 0;
+}
+
+int main(int argc, char *argv[])
 {
 	struct simple_drmbuffer *sfb = NULL;
 	struct drm_mode_card_res *res = NULL;
@@ -221,12 +296,14 @@ int main()
 	memset(&g_server, 0, sizeof(g_server));
 	g_server.vscroll_amount = 2;
 
-	if (read_environ())
-		return -1;
-
 	/* line buffer output */
 	setvbuf(stdout, NULL, _IOLBF, 0);
 	setvbuf(stderr, NULL, _IOLBF, 0);
+
+	if (read_environ())
+		return -1;
+	if (read_args(argc, argv))
+		return -1;
 
 	card_fd = open("/dev/dri/card0", O_RDWR|O_CLOEXEC);
 	if (card_fd == -1) {
@@ -244,10 +321,6 @@ int main()
 		goto free_ret;
 	}
 
-	/*printf("--- Card 0 Resources ----------------------\n");
-	print_mode_card_resources(res);*/
-	/* print connector info */
-	/*for (i = 0; i < res->count_connectors; ++i)*/
 	i = 0;
 	mode_count = 0;
 	conn_id = drm_get_id(res->connector_id_ptr, i);
@@ -257,8 +330,6 @@ int main()
 		ret = -1;
 		goto free_ret;
 	}
-	/*printf("--- Connector %d --------------------------\n", conn_id);
-	print_connector(conn);*/
 
 	modes = get_connector_modeinfo(conn, &mode_count);
 	idx = get_mode_idx(modes, mode_count,
@@ -283,7 +354,6 @@ int main()
 
 	if (connect_sfb(card_fd, conn, &modes[idx], sfb) == -1) {
 		ret = -1;
-		/*free_connector(conn); */
 		goto free_ret;
 	}
 
@@ -291,20 +361,17 @@ int main()
 	g_state.conn    = conn;
 	g_state.sfb     = sfb;
 	g_state.conn_modeidx = idx;
+	conn = NULL;
 	/* drmstate must be set before any SIGUSR1/2's might be sent! */
 	drm_set_state(&g_state);
-	/*if (card_drop_master(card_fd)) {
-		ret = -1;
-		goto free_ret;
-	}*/
 
 	tty = 0;
 	/*K_XLATE, or K_MEDIUMRAW for keycodes, RAW is 8 bits*/
 	if (vt_init(tty, K_XLATE)) {
-		return -1;
+		goto free_ret;
 	}
 	if (atexit(vt_shutdown)) {
-		return -1;
+		goto free_ret;
 	}
 	sig_setup();
 	ret = exec_loop(tty);
@@ -312,7 +379,7 @@ int main()
 free_ret:
 	/* TODO general cleanup function that loops through resources on a card */
 	/* free_sfb !!! */
-	free_connector(g_state.conn);
+	free_connector(conn);
 	free_mode_card_res(res);
 	close(card_fd);
 	return ret;
