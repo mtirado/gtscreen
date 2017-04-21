@@ -56,6 +56,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <unistd.h>
+#include <time.h>
 #include <linux/input.h>
 #include "sporg.h"
 #include <xorg/input.h>
@@ -70,6 +71,14 @@ enum {
 	CURSOR_COUNT
 };
 ValuatorMask *g_cursor;
+
+/* converts to screen space (not sprite space) */
+uint32_t g_rootwidth;
+uint32_t g_rootheight;
+
+#define TAPTOUCH_THRESHOLD 30
+struct timespec g_lastmotion;
+
 
 /******************************************************************************
  * Function/Macro keys variables
@@ -253,12 +262,12 @@ static void axis_relative_accumulate(struct spr16_msgdata_input *msg)
 {
 	int val;
 	if (msg->code == REL_X) {
-		val = valuator_mask_get(g_cursor, REL_X) + msg->val;
-		valuator_mask_set(g_cursor, REL_X, val);
+		val = valuator_mask_get(g_cursor, 0) + msg->val;
+		valuator_mask_set(g_cursor, 0, val);
 	}
 	else if (msg->code == REL_Y) {
-		val = valuator_mask_get(g_cursor, REL_Y) + msg->val;
-		valuator_mask_set(g_cursor, REL_Y, val);
+		val = valuator_mask_get(g_cursor, 1) + msg->val;
+		valuator_mask_set(g_cursor, 1, val);
 	}
 	else if (msg->code == REL_WHEEL) {
 		val = -msg->val;
@@ -266,17 +275,41 @@ static void axis_relative_accumulate(struct spr16_msgdata_input *msg)
 	}
 	/* both horizontal?
 	 * else if (msg->code == REL_DIAL) {
-		val = valuator_mask_get(g_cursor, REL_Y) + msg->val;
-		valuator_mask_set(g_cursor, REL_Y, val);
+		val = valuator_mask_get(g_cursor, 1) + msg->val;
+		valuator_mask_set(g_cursor, 1, val);
 	}
 	else if (msg->code == REL_HWHEEL) {
-		val = valuator_mask_get(g_cursor, REL_Y) + msg->val;
-		valuator_mask_set(g_cursor, REL_Y, val);
+		val = valuator_mask_get(g_cursor, 1) + msg->val;
+		valuator_mask_set(g_cursor, 1, val);
 	}*/
 }
+
 static void axis_relative_post(InputInfoPtr info)
 {
 	xf86PostMotionEventM(info->dev, Relative, g_cursor);
+	valuator_mask_zero(g_cursor);
+}
+
+static void axis_absolute(struct spr16_msgdata_input *msg)
+{
+	float val;
+
+	/* TODO optionally convert absolute to relative motion */
+	msg->ext = (msg->ext ? msg->ext : 1);
+	val = ((float)msg->val / (float)msg->ext);
+	if (msg->code == ABS_X) {
+		clock_gettime(CLOCK_MONOTONIC_RAW, &g_lastmotion);
+		valuator_mask_set(g_cursor, 0, val*g_rootwidth);
+	}
+	else if (msg->code == ABS_Y) {
+		clock_gettime(CLOCK_MONOTONIC_RAW, &g_lastmotion);
+		valuator_mask_set(g_cursor, 1, val*g_rootheight);
+	}
+}
+
+static void axis_absolute_post(InputInfoPtr info)
+{
+	xf86PostMotionEventM(info->dev, Absolute, g_cursor);
 	valuator_mask_zero(g_cursor);
 }
 
@@ -285,7 +318,9 @@ static void key_event(InputInfoPtr info, struct spr16_msgdata_input *msg)
 	uint32_t k_c;
 
 	/* button range is BTN_0 ... BTN_GEAR_UP, currently only deals with mouse */
-	if (msg->code >= SPR16_KEYCODE_LBTN && msg->code <= SPR16_KEYCODE_FBTN) {
+	if (msg->code >= SPR16_KEYCODE_LBTN && msg->code <= SPR16_KEYCODE_CONTACT) {
+		struct timespec elapsed, now;
+		unsigned int usec;
 		switch (msg->code)
 		{
 			case SPR16_KEYCODE_LBTN:
@@ -294,18 +329,39 @@ static void key_event(InputInfoPtr info, struct spr16_msgdata_input *msg)
 			case SPR16_KEYCODE_RBTN:
 				k_c = 3; /* xorg right is 3 */
 				break;
-			default:
-				k_c = 2; /* xorg middle is 2 */
+			case SPR16_KEYCODE_CONTACT:
+				/* tap to touch on motion timer */
+				clock_gettime(CLOCK_MONOTONIC_RAW, &now);
+				elapsed.tv_sec  = now.tv_sec - g_lastmotion.tv_sec;
+				if (!elapsed.tv_sec) {
+					elapsed.tv_nsec = now.tv_nsec
+							- g_lastmotion.tv_nsec;
+					usec = elapsed.tv_nsec / 1000;
+				}
+				else {
+					usec = ((1000000000 - g_lastmotion.tv_nsec)
+							+ now.tv_nsec) / 1000;
+					usec += (elapsed.tv_sec-1) * 1000000;
+				}
+				if (msg->val == 0) {
+					k_c = 1;
+				}
+				else if (usec < 300000) { /* 0.3 seconds */
+					k_c = 1;
+				}
+				else {
+					return;
+				}
 				break;
-			/*case SPR16_KEYCODE_ABTN:
-				k_c = 3;
-				break;*/
 				/* from evdev driver:
 				 *  BTN_SIDE ... BTN_JOYSTICK  =  8 + code - BTN_SIDE
 				 *  BTN_0 ... BTN_2 = 1 + code - BTN_0
 				 *  BTN_3 ... BTN_MOUSE - 1 = 8 + code - BTN_3
 				 *
 				 */
+			default:
+				k_c = 2; /* xorg middle is 2 */
+				break;
 		}
 		xf86PostButtonEvent(info->dev, Relative, k_c, (msg->val == 1), 0, 0);
 		return;
@@ -325,6 +381,7 @@ static void sporgReadInput(InputInfoPtr pInfo)
 {
 	struct spr16_msgdata_input msgs[1024];
 	int post_relative = 0;
+	int post_absolute = 0;
 	int bytes;
 	unsigned int i;
 intr:
@@ -345,6 +402,10 @@ intr:
 			axis_relative_accumulate(&msgs[i]);
 			post_relative = 1;
 			break;
+		case SPR16_INPUT_AXIS_ABSOLUTE:
+			axis_absolute(&msgs[i]);
+			post_absolute = 1;
+			break;
 		case SPR16_INPUT_KEY:
 			key_event(pInfo, &msgs[i]);
 			break;
@@ -358,6 +419,8 @@ intr:
 	}
 	if (post_relative)
 		axis_relative_post(pInfo);
+	if (post_absolute)
+		axis_absolute_post(pInfo);
 	return;
 }
 
@@ -480,19 +543,47 @@ static int xf86VoidInit(InputDriverPtr drv, InputInfoPtr pInfo,	int flags)
 {
 	int input_read_fd = -1;
 	char *fdnum;
-	char *err = NULL;
+	char *err;
+	char *width;
+	char *height;
 
+	clock_gettime(CLOCK_MONOTONIC_RAW, &g_lastmotion);
+	/* this is hacky for absolute touch dimensions, means we can't resize */
 	fdnum = getenv("SPORG_INPUT_READ");
 	if (fdnum == NULL) {
 		fprintf(stderr, "couldn't locate input descriptor\n");
 		return -1;
 	}
-	errno = 0;
+
+	width  = getenv("SPORG_WIDTH");
+	height = getenv("SPORG_HEIGHT");
+	if (!width || !height) {
+		fprintf(stderr, "missing width/height env\n");
+		return -1;
+	}
+
+	errno = err = 0;
 	input_read_fd = strtol(fdnum, &err, 10);
 	if (err == NULL || *err || errno || input_read_fd < 0) {
 		fprintf(stderr, "erroneous input fdnum\n");
 		return -1;
 	}
+
+	errno = err = 0;
+	g_rootwidth = strtol(width, &err, 10);
+	if (err == NULL || *err || errno
+			|| g_rootwidth < 120 || g_rootwidth > UINT16_MAX) {
+		fprintf(stderr, "bad width env var\n");
+		return -1;
+	}
+	errno = err = 0;
+	g_rootheight = strtol(height, &err, 10);
+	if (err == NULL || *err || errno
+			|| g_rootheight < 120 || g_rootheight > UINT16_MAX) {
+		fprintf(stderr, "bad width env var\n");
+		return -1;
+	}
+
 	fprintf(stderr, "--------------------------------------------------\n");
 	fprintf(stderr, "- sporg input init -------------------------------\n");
 	fprintf(stderr, "--------------------------------------------------\n");

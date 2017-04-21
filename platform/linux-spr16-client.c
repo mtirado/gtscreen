@@ -28,6 +28,7 @@
  * for multiple regions, right now it's just one big chunk of shmem.
  */
 input_handler g_input_func;
+input_surface_handler g_input_surface_func;
 servinfo_handler g_servinfo_func;
 
 /* TODO we probably want a client context */
@@ -52,6 +53,7 @@ struct spr16 *spr16_client_get_sprite()
 int spr16_client_init()
 {
 	g_input_func = NULL;
+	g_input_surface_func = NULL;
 	g_servinfo_func = NULL;
 	g_epoll_fd = -1;
 	g_socket = -1;
@@ -186,7 +188,7 @@ failure:
 	return -1;
 }
 
-int spr16_client_handshake_start(char *name, uint16_t width, uint16_t height)
+int spr16_client_handshake_start(char *name, uint16_t width, uint16_t height, uint32_t flags)
 {
 	struct spr16_msghdr hdr;
 	struct spr16_msgdata_register_sprite data;
@@ -200,6 +202,7 @@ int spr16_client_handshake_start(char *name, uint16_t width, uint16_t height)
 		return -1;
 	}
 	hdr.type = SPRITEMSG_REGISTER_SPRITE;
+	data.flags = flags;
 	data.width = width;
 	data.height = height;
 	data.bpp = bpp;
@@ -207,9 +210,10 @@ int spr16_client_handshake_start(char *name, uint16_t width, uint16_t height)
 	if (spr16_write_msg(g_socket, &hdr, &data, sizeof(data))) {
 		return -1;
 	}
-	g_sprite.bpp = bpp;
+	g_sprite.flags = flags;
 	g_sprite.width = width;
 	g_sprite.height = height;
+	g_sprite.bpp = bpp;
 	return 0;
 }
 
@@ -375,17 +379,45 @@ int spr16_client_shutdown()
 	return 0;
 }
 
-int spr16_client_input(struct spr16_msgdata_input *msg)
+/* TODO */
+static int surface_emulate_pointer(struct spr16_msgdata_input_surface *msg)
 {
+	printf("TODO emulate pointer\n");
+	(void)msg;
 	if (!g_input_func)
 		return 0;
-	return g_input_func(msg);
+	return 0;
 }
 
-/* TODO, either unify all input messages, or split up into multiple handlers */
+int spr16_client_input_surface(struct spr16_msgdata_input_surface *msg)
+{
+	if (g_input_surface_func == NULL) {
+		return surface_emulate_pointer(msg);
+	}
+	else {
+		return g_input_surface_func(msg);
+	}
+}
+
+int spr16_client_input(struct spr16_msgdata_input *msg)
+{
+	if (g_input_func == NULL) {
+		return 0;
+	}
+	else {
+		return g_input_func(msg);
+	}
+}
+
 int spr16_client_set_input_handler(input_handler func)
 {
 	g_input_func = func;
+	return 0;
+}
+
+int spr16_client_set_input_surface_handler(input_surface_handler func)
+{
+	g_input_surface_func = func;
 	return 0;
 }
 

@@ -14,6 +14,17 @@
 	#define PTRBITCOUNT 32
 #endif
 
+/* kernel structs use __u64 for pointer types */
+#if (PTRBITCOUNT == 32)
+	#define ptr_from_krn(ptr) ((void *)(uint32_t)(ptr))
+	#define ptr_to_krn(ptr)   ((uint32_t)(ptr))
+#elif (PTRBITCOUNT == 64)
+	#define ptr_from_krn(ptr) ((void *)(uint64_t)(ptr))
+	#define ptr_to_krn(ptr)   ((uint64_t)(ptr))
+#else
+	#error "PTRBITCOUNT is undefined"
+#endif
+
 
 /*
  * resource limits

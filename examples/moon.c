@@ -1,7 +1,7 @@
 /* (c) 2016 Michael R. Tirado -- GPLv3, GNU General Public License version 3.
  *
  */
-
+#define _GNU_SOURCE
 #include <malloc.h>
 #include <memory.h>
 #include "game.h"

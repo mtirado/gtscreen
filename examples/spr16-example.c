@@ -19,7 +19,7 @@ int handle_servinfo(struct spr16_msgdata_servinfo *sinfo)
 	printf("max width: %d\n", sinfo->width);
 	printf("max width: %d\n", sinfo->height);
 	printf("max bpp: %d\n",   sinfo->bpp);
-	if (spr16_client_handshake_start("Landit", 640, 480))
+	if (spr16_client_handshake_start("Landit", 640, 480, SPRITE_FLAG_INVERT_Y))
 		return -1;
 	return 0;
 }

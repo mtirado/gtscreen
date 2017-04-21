@@ -536,6 +536,16 @@ static int create_input_descriptors(int *ipc)
 		fprintf(stderr, "setenv: %s\n", STRERR);
 		return -1;
 	}
+	snprintf(buf, sizeof(buf), "%d", g_servinfo.width);
+	if (setenv("SPORG_WIDTH", buf, 1)) {
+		fprintf(stderr, "setenv: %s\n", STRERR);
+		return -1;
+	}
+	snprintf(buf, sizeof(buf), "%d", g_servinfo.height);
+	if (setenv("SPORG_HEIGHT", buf, 1)) {
+		fprintf(stderr, "setenv: %s\n", STRERR);
+		return -1;
+	}
 	return 0;
 }
 

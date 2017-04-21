@@ -275,6 +275,7 @@ int spr16_server_register_sprite(int fd, struct spr16_msgdata_register_sprite *r
 	cl->sprite.width = reg->width;
 	cl->sprite.height = reg->height;
 	cl->sprite.shmem.size = (reg->bpp/8) * reg->width * reg->height;
+	cl->sprite.flags = reg->flags;
 	if (spr16_send_ack(fd, SPR16_ACK, SPRITEACK_SEND_DESCRIPTOR)) {
 		printf("send_descriptor ack failed\n");
 		return -1;
@@ -582,19 +583,40 @@ int spr16_server_sync(struct spr16_msgdata_sync *region)
 		printf("align: %d\n", width%BLKSZ);
 		return -1;
 	}
-	for (i = 0; i < region->height; ++i)
-	{
-		const uint32_t svoff = (((region->y + i)*g_width)*weight)+xoff;
-		const uint32_t cloff = (((region->y + i)*cl->sprite.width)*weight)+xoff;
-		uint16_t z;
-		for (z = 0; z < count; ++z) {
-			memcpy((g_state.sfb->addr + svoff) + (z * BLKSZ),
-				(cl->sprite.shmem.addr + cloff) + (z * BLKSZ), BLKSZ);
+
+	if (cl->sprite.flags & SPRITE_FLAG_INVERT_Y) {
+		for (i = 0; i < region->height; ++i)
+		{
+			const uint32_t svoff =
+				(((region->y + i)*g_width)*weight)+xoff;
+			const uint32_t cloff =
+				(((region->y + i)*cl->sprite.width)*weight)+xoff;
+			uint16_t z;
+			for (z = 0; z < count; ++z) {
+				memcpy((g_state.sfb->addr + svoff)
+						+ (z * BLKSZ),
+					(cl->sprite.shmem.addr + cloff)
+						+ (z * BLKSZ), BLKSZ);
+			}
 		}
-		/*x86_sse2_xmmcpy_256(g_state.sfb->addr + svoff,
-				    cl->sprite.shmem.addr + cloff,
-				    count);*/
 	}
+	else {
+		uint16_t yfix = (g_height - 1 - region->y);
+		for (i = 0; i < region->height; ++i)
+		{
+			const uint32_t svoff = ((region->y + i)*g_width*weight)+xoff;
+			const uint32_t cloff = ((yfix - i)*cl->sprite.width*weight)+xoff;
+			uint16_t z;
+			for (z = 0; z < count; ++z) {
+				memcpy((g_state.sfb->addr + svoff) + (z * BLKSZ),
+					(cl->sprite.shmem.addr + cloff) + (z * BLKSZ),
+					BLKSZ);
+			}
+		}
+	}
+	/*x86_sse2_xmmcpy_256(g_state.sfb->addr + svoff,
+			    cl->sprite.shmem.addr + cloff,
+			    count);*/
 	return 0;
 }
 

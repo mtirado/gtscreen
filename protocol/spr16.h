@@ -28,12 +28,11 @@
  * this is not suitible for networked usage, due to the nature of
  * struct padding on various architectures. you would want to add some sync
  * compression in addition to proper serialization if taking that route.
- *
+ * NOTE: all structs must be evenly sized / divide evenly by 2, unless you
+ * want to handle adding a triple read if msg truncates with 1 byte fragment
+ * for some crazy reason, i don't know if all arch's are safe from this?
  */
 
-/* NOTE: all structs must be evenly sized / divide evenly by 2, unless you
- * want to handle adding a triple read if msg truncates with 1 byte fragment
- */
 
 #define SPR16_MAXMSGLEN 64 /* hdr+data */
 #define SPR16_MAXNAME   32
@@ -64,21 +63,25 @@ enum {
  * SERVINFO        - Server sends global parameters to client.
  * REGISTER_SPRITE - This message is handled only once to complete handshake.
  * 		     maps shared memory between server and client.
- * INPUT           - Send input event.
  * ACK             - ACK or NACK message.
- * SYNC            - Notify server of modified buffer region.
+ * SYNC            - Sync modified sprite region.
+ * INPUT           - Send input event to client.
  *
  * */
 enum {
-	SPRITEMSG_SERVINFO=123,
+	SPRITEMSG_SERVINFO=100,
 	SPRITEMSG_REGISTER_SPRITE,
-	SPRITEMSG_INPUT,
 	SPRITEMSG_ACK,
-	SPRITEMSG_SYNC
+	SPRITEMSG_SYNC,
+	SPRITEMSG_INPUT,
+	SPRITEMSG_INPUT_SURFACE
 };
 
-/* bit flags */
-#define SPRITE_VISIBLE 1
+/* bit flags
+ * TODO so clients don't have to keep rendering if invisible
+ */
+#define SPRITE_FLAG_VISIBLE  1
+#define SPRITE_FLAG_INVERT_Y 2
 
 struct spr16_shmem {
 	char *addr;
@@ -106,7 +109,7 @@ struct spr16 {
  */
 struct spr16_msghdr {
 	uint16_t type;
-	uint16_t id;
+	uint16_t bits;
 	/* if you add to this be warned, linux platform code assumes this struct is only
 	 * 2 uint16_t's, in a few places. make sure you know what you're doing
 	 */
@@ -122,6 +125,7 @@ struct spr16_msgdata_servinfo {
  * to transfer sprite file descriptor to server process */
 struct spr16_msgdata_register_sprite {
 	char name[SPR16_MAXNAME];
+	uint32_t flags;
 	uint16_t width;
 	uint16_t height;
 	uint16_t bpp;
@@ -142,27 +146,40 @@ struct spr16_msgdata_sync {
 	uint16_t height;
 };
 
-
+/*
+ * TODO stop using evdev code defines.
+ * type values:
+ *      key      - code=key  val=state
+ * 	absolute - code=axis val=pos   ext=max
+ * 	surface  - code=id   val=mag   ext=magmax
+ */
 struct spr16_msgdata_input {
-	uint32_t val;
+	int32_t  val;
+	int32_t  ext;
 	uint16_t code;
 	uint8_t  type;
 	uint8_t  bits;
+};
+
+struct spr16_msgdata_input_surface {
+	struct spr16_msgdata_input input;
+	int32_t xpos;
+	int32_t ypos;
+	int32_t xmax;
+	int32_t ymax;
 };
 
 enum {
 	SPR16_INPUT_KEY = 1,   /* full spr16 keycodes */
 	SPR16_INPUT_KEY_ASCII, /* fallback ascii mapped keycodes */
 	SPR16_INPUT_AXIS_RELATIVE,
-	SPR16_INPUT_AXIS_ABSOLUTE
+	SPR16_INPUT_AXIS_ABSOLUTE,
+	SPR16_INPUT_SURFACE
 };
 
-/* TODO implement tracking id's, and should probably make bits type specific,
- * for better flexibility. ascii can't be raw, no tracking id, etc */
-#define SPR16_INPUT_TRACK_MASK 0x1f /* 5 bit tracking id */
-#define SPR16_INPUT_FLAGS_MASK 0x70 /* 3 bit flags */
-#define SPR16_INPUT_FLAG_RAW   0x20 /* raw bytes, application specific */
-/* 0x40, 0x80 */
+#define SPR16_SURFACE_MAX_CONTACTS 64
+
+
 
 /* TODO some vt switch other than linux kernel vt keyboard */
 #define SPR16_KEYMOD_LALT  0x00000001
@@ -235,10 +252,12 @@ enum {
 	SPR16_KEYCODE_CBTN,
 	SPR16_KEYCODE_DBTN,
 	SPR16_KEYCODE_EBTN,
-	SPR16_KEYCODE_FBTN
+	SPR16_KEYCODE_FBTN,
+	SPR16_KEYCODE_CONTACT
 };
 
 typedef int (*input_handler)(struct spr16_msgdata_input *input);
+typedef int (*input_surface_handler)(struct spr16_msgdata_input_surface *surface);
 typedef int (*servinfo_handler)(struct spr16_msgdata_servinfo *sinfo);
 
 /*----------------------------------------------*
@@ -258,11 +277,11 @@ int afunix_recv_fd(int sock, int *fd_out);
  *----------------------------------------------*/
 int spr16_client_init();
 int spr16_client_connect(char *name);
-int spr16_client_handshake_start(char *name, uint16_t width, uint16_t height);
+int spr16_client_handshake_start(char *name, uint16_t width, uint16_t height, uint32_t flags);
 int spr16_client_handshake_wait(uint32_t timeout);
 int spr16_client_servinfo(struct spr16_msgdata_servinfo *sinfo);
 /* TODO pixel formats */
-int spr16_client_register_sprite(char *name, uint16_t width, uint16_t height);
+int spr16_client_register_sprite(char *name, uint16_t width, uint16_t height, uint32_t flags);
 int spr16_client_update(int poll_timeout); /* timeout in milliseconds, <0 blocks */
 int spr16_client_shutdown();
 struct spr16_msgdata_servinfo *spr16_client_get_servinfo();
@@ -271,8 +290,14 @@ struct spr16 *spr16_client_get_sprite();
 /* may return -1 with errno set to EAGAIN, if server buffer is full */
 int spr16_client_sync(uint16_t x, uint16_t y, uint16_t width, uint16_t height);
 int spr16_client_input(struct spr16_msgdata_input *msg);
-int spr16_client_set_input_handler(input_handler func);
+int spr16_client_input_surface(struct spr16_msgdata_input_surface *msg);
 int spr16_client_set_servinfo_handler(servinfo_handler func);
+
+int spr16_client_set_input_handler(input_handler func);
+/* TODO
+ * if surface handler is unset, events should be translated and passed
+ * to input_handler as a regular pointer, and add tap to click env var */
+int spr16_client_set_input_surface_handler(input_surface_handler func);
 
 
 /*----------------------------------------------*
@@ -341,8 +366,8 @@ struct input_device {
 	input_flush func_flush;
 	input_transceive func_transceive;
 	input_hotkey func_hotkey;
+	void *private; /* first variable always uint32_t type */
 	struct input_device *next;
-	uint32_t private;
 	uint32_t keyflags;
 	int fd;
 };

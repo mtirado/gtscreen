@@ -5,7 +5,6 @@
 DEFINES := -DMAX_SYSTEMPATH=1024 -DPTRBITCOUNT=32
 CFLAGS  := -pedantic -Wall -Wextra -Werror $(DEFINES)
 DEFLANG := -ansi
-
 #DBG	:= -g -march=core2 -mtune=core2
 # TODO benchmark sync
 
@@ -30,12 +29,21 @@ GTSCREEN_OBJS := $(GTSCREEN_SRCS:.c=.gtscreen.o) \
 # example program
 SPR16_EX_SRCS := ./examples/spr16-example.c	\
 		 ./examples/game.c		\
+		 ./examples/util.c		\
 		 ./examples/dynamics.c		\
 		 ./examples/moon.c		\
 		 ./examples/craft.c		\
 		 ./platform/linux-spr16-msgs.c	\
 		 ./platform/linux-spr16-client.c
 SPR16_EX_OBJS := $(SPR16_EX_SRCS:.c=.spr16_ex.o)
+
+# touch input example
+TOUCHPAINT_SRCS := ./examples/touchpaint.c	\
+		 ./examples/util.c		\
+		 ./platform/linux-spr16-msgs.c	\
+		 ./platform/linux-spr16-client.c
+TOUCHPAINT_OBJS := $(TOUCHPAINT_SRCS:.c=.touchpaint.o)
+
 
 #  spr16-x11-xorg graphic drivers
 SPORG_GFX_SRCS := 	./airlock/driver/x11/sporg.c		\
@@ -47,7 +55,7 @@ SPORG_GFX_OBJS := $(SPORG_GFX_SRCS:.c=.sporg_gfx.o)
 SPORG_GFX_INC := -I/usr/include/xorg -I/usr/include/pixman-1
 
 #  spr16-x11-xorg input driver
-SPORG_INPUT_SRCS :=	 ./airlock/driver/x11/sporg_input.c
+SPORG_INPUT_SRCS := ./airlock/driver/x11/sporg_input.c
 SPORG_INPUT_OBJS := $(SPORG_INPUT_SRCS:.c=.sporg_input.o)
 SPORG_INPUT_INC := -I/usr/include/xorg -I/usr/include/pixman-1
 
@@ -56,6 +64,7 @@ SPORG_INPUT_INC := -I/usr/include/xorg -I/usr/include/pixman-1
 ########################################
 GTSCREEN := gtscreen
 SPR16_EX := spr16_example
+TOUCHPAINT := touchpaint
 SPORG_GFX   := sporg_drv.so
 SPORG_INPUT := sporginput_drv.so
 
@@ -71,6 +80,8 @@ SPORG_INPUT := sporginput_drv.so
 	$(CC) -c $(DEFLANG) -DSPR16_SERVER $(CFLAGS) $(DBG) -o $@ $<
 %.spr16_ex.o: %.c
 	$(CC) -c $(DEFLANG) $(CFLAGS) $(DBG) -o $@ $<
+%.touchpaint.o: %.c
+	$(CC) -c $(DEFLANG) $(CFLAGS) $(DBG) -o $@ $<
 %.sporg_gfx.o: %.c
 	$(CC) -c -std=gnu99 -pedantic -Wall -fPIC $(DBG) $(SPORG_GFX_INC) -o $@ $<
 %.sporg_input.o: %.c
@@ -78,6 +89,7 @@ SPORG_INPUT := sporginput_drv.so
 all:			\
 	$(GTSCREEN)	\
 	$(SPR16_EX)	\
+	$(TOUCHPAINT)	\
 	$(SPORG_GFX)	\
 	$(SPORG_INPUT)
 
@@ -99,6 +111,14 @@ $(SPR16_EX):		$(SPR16_EX_OBJS)
 			@echo "| spr16_example    OK |"
 			@echo "x---------------------x"
 			@echo ""
+$(TOUCHPAINT):		$(TOUCHPAINT_OBJS)
+			$(CC) $(LDFLAGS) -lm $(TOUCHPAINT_OBJS) -o $@
+			@echo ""
+			@echo "x---------------------x"
+			@echo "| touchpaint       OK |"
+			@echo "x---------------------x"
+			@echo ""
+
 
 $(SPORG_GFX):		$(SPORG_GFX_OBJS)
 			$(CC) $(LDFLAGS) -shared $(SPORG_GFX_OBJS) -o $@
@@ -122,11 +142,13 @@ $(SPORG_INPUT):	$(SPORG_INPUT_OBJS)
 clean:
 	@$(foreach obj, $(GTSCREEN_OBJS), rm -fv $(obj);)
 	@$(foreach obj, $(SPR16_EX_OBJS), rm -fv $(obj);)
+	@$(foreach obj, $(TOUCHPAINT_OBJS), rm -fv $(obj);)
 	@$(foreach obj, $(SPORG_GFX_OBJS), rm -fv $(obj);)
 	@$(foreach obj, $(SPORG_INPUT_OBJS), rm -fv $(obj);)
 
 	@-rm -fv ./$(GTSCREEN)
 	@-rm -fv ./$(SPR16_EX)
+	@-rm -fv ./$(TOUCHPAINT)
 	@-rm -fv ./$(SPORG_GFX)
 	@-rm -fv ./$(SPORG_INPUT)
 	@echo "cleaned."

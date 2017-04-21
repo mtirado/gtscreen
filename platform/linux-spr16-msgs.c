@@ -2,7 +2,6 @@
  *
  * common functions used by client and server
  *
- *
  */
 #define _GNU_SOURCE
 #include <errno.h>
@@ -16,9 +15,11 @@
 
 #define STRERR strerror(errno)
 
-#define MAX_MSGBUF_READ (512 - SPR16_MAXMSGLEN)
+/* leave room for truncated message */
+#define MAX_MSGBUF_READ ((SPR16_MAXMSGLEN * 16) - SPR16_MAXMSGLEN)
 #define MIN_MSGBUF_READ (sizeof(struct spr16_msghdr)+2)
 char g_msgbuf[MAX_MSGBUF_READ+SPR16_MAXMSGLEN];
+
 static void print_bytes(char *buf, const uint16_t len)
 {
 	int i;
@@ -39,6 +40,8 @@ uint32_t get_msghdr_typelen(struct spr16_msghdr *hdr)
 		return (uint32_t)sizeof(struct spr16_msgdata_register_sprite);
 	case SPRITEMSG_INPUT:
 		return (uint32_t)sizeof(struct spr16_msgdata_input);
+	case SPRITEMSG_INPUT_SURFACE:
+		return (uint32_t)sizeof(struct spr16_msgdata_input_surface);
 	case SPRITEMSG_ACK:
 		return (uint32_t)sizeof(struct spr16_msgdata_ack);
 	case SPRITEMSG_SYNC:
@@ -55,7 +58,7 @@ int spr16_write_msg(int fd, struct spr16_msghdr *hdr,
 {
 	char msg[SPR16_MAXMSGLEN];
 	unsigned int intr_count = 0;
-	hdr->id = 0;
+	hdr->bits = 0;
 	memcpy(msg, hdr, sizeof(*hdr));
 	memcpy(msg + sizeof(*hdr), msgdata, msgdata_len);
 interrupted:
@@ -243,6 +246,14 @@ int spr16_dispatch_msgs(int fd, char *msgbuf, uint32_t buflen)
 		case SPRITEMSG_INPUT:
 			if (spr16_client_input((struct spr16_msgdata_input *)msgdata)) {
 				fprintf(stderr, "input failed\n");
+				return -1;
+			}
+			break;
+		case SPRITEMSG_INPUT_SURFACE:
+			if (spr16_client_input_surface(
+						(struct spr16_msgdata_input_surface *)
+						msgdata)) {
+				fprintf(stderr, "input_surface failed\n");
 				return -1;
 			}
 			break;

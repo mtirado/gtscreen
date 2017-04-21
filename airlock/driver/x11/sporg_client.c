@@ -93,7 +93,7 @@ int handle_servinfo_connect(struct spr16_msgdata_servinfo *sinfo)
 		fprintf(stderr, "bad width/height %d/%d", g_width, g_height);
 		return -1;
 	}
-	if (spr16_client_handshake_start(name, g_width, g_height)) {
+	if (spr16_client_handshake_start(name, g_width, g_height, SPRITE_FLAG_INVERT_Y)){
 		fprintf(stderr, "handshake_start failed\n");
 		return -1;
 	}
