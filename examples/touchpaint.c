@@ -79,8 +79,6 @@ int update_contact(int id, struct vec2 pos, int magnitude, int magnitude_max)
 	}
 	printf("error, contact list is full\n");
 	return -1;
-
-	
 }
 
 int touch_init(struct spr16 *screen)
@@ -162,7 +160,7 @@ int surface_input(struct spr16_msgdata_input_surface *surface)
 				v,
 				surface->input.val,
 				surface->input.ext)) {
-		printf("update_contact fail, code= %d\n", surface->input.code);	
+		printf("update_contact fail, code= %d\n", surface->input.code);
 		/* XXX return -1? */
 		return 0;
 	}
@@ -171,8 +169,6 @@ int surface_input(struct spr16_msgdata_input_surface *surface)
 
 int touch_update()
 {
-	/*if (dynamics_step(&g_moon->dyn_objs, 1000))
-		return -1;*/
 	return 0;
 }
 
@@ -300,7 +296,7 @@ int main(int argc, char *argv[])
 			usec = ((1000000000 - tlast.tv_nsec) + tcur.tv_nsec) / 1000;
 			usec += (elapsed.tv_sec-1) * 1000000;
 		}
-		
+
 		if (usec >= 32000) { /* roughly 30fps */
 			tlast = tcur;
 			if (touch_draw())
