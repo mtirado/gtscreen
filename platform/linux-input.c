@@ -479,7 +479,8 @@ static unsigned int consume_surface_report(struct input_device *self, int client
 
 	case ABS_MT_TRACKING_ID:
 		if (active_contact < 0) {
-			break;
+			/* initial contact is -1 ! */
+			active_contact = 0;
 		}
 
 		if (event->value < 0) {
