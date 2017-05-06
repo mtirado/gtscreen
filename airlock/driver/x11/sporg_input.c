@@ -76,9 +76,8 @@ ValuatorMask *g_cursor;
 uint32_t g_rootwidth;
 uint32_t g_rootheight;
 
-#define TAPTOUCH_THRESHOLD 30
-struct timespec g_lastmotion;
-
+int g_rel_cursor_x;
+int g_rel_cursor_y;
 
 /******************************************************************************
  * Function/Macro keys variables
@@ -103,7 +102,7 @@ static uint32_t ctrl_to_x11(unsigned char c)
 	}
 }
 /*
- * TODO many keys missing, numpad!!
+ * TODO many keys missing!
  */
 static uint32_t to_x11(uint16_t k_c)
 {
@@ -243,7 +242,7 @@ static void sporg_ascii_mode(InputInfoPtr info, struct spr16_msgdata_input *msg)
 	if (state_shifted) {
 		struct spr16_msgdata_input fake_shift;
 		uint32_t shift_key;
-		fake_shift.bits = 0;
+		fake_shift.id = msg->id;
 		fake_shift.code = 14;
 		shift_key = spr16_to_x11(info->dev, &fake_shift);
 		xf86PostKeyboardEvent(info->dev, shift_key, 1);
@@ -260,18 +259,24 @@ static void sporg_ascii_mode(InputInfoPtr info, struct spr16_msgdata_input *msg)
 /* TODO user defined acceleration */
 static void axis_relative_accumulate(struct spr16_msgdata_input *msg)
 {
-	int val;
 	if (msg->code == REL_X) {
-		val = valuator_mask_get(g_cursor, 0) + msg->val;
-		valuator_mask_set(g_cursor, 0, val);
+		g_rel_cursor_x += msg->val;
+		if (g_rel_cursor_x / (float)REL_PRECISION >= g_rootwidth)
+			g_rel_cursor_x = (g_rootwidth-1) * (float)REL_PRECISION;
+		else if (g_rel_cursor_x < 0)
+			g_rel_cursor_x = 0;
+		valuator_mask_set(g_cursor, 0, g_rel_cursor_x / (float)REL_PRECISION);
 	}
 	else if (msg->code == REL_Y) {
-		val = valuator_mask_get(g_cursor, 1) + msg->val;
-		valuator_mask_set(g_cursor, 1, val);
+		g_rel_cursor_y += msg->val;
+		if (g_rel_cursor_y / (float)REL_PRECISION >= g_rootheight)
+			g_rel_cursor_y = (g_rootheight-1) * (float)REL_PRECISION;
+		else if (g_rel_cursor_y < 0)
+			g_rel_cursor_y = 0;
+		valuator_mask_set(g_cursor, 1, g_rel_cursor_y / (float)REL_PRECISION);
 	}
 	else if (msg->code == REL_WHEEL) {
-		val = -msg->val;
-		valuator_mask_set(g_cursor, CURSOR_Z, val);
+		valuator_mask_set(g_cursor, CURSOR_Z, -msg->val);
 	}
 	/* both horizontal?
 	 * else if (msg->code == REL_DIAL) {
@@ -286,23 +291,19 @@ static void axis_relative_accumulate(struct spr16_msgdata_input *msg)
 
 static void axis_relative_post(InputInfoPtr info)
 {
-	xf86PostMotionEventM(info->dev, Relative, g_cursor);
+	xf86PostMotionEventM(info->dev, Absolute, g_cursor);
 	valuator_mask_zero(g_cursor);
 }
 
 static void axis_absolute(struct spr16_msgdata_input *msg)
 {
 	float val;
-
-	/* TODO optionally convert absolute to relative motion */
 	msg->ext = (msg->ext ? msg->ext : 1);
 	val = ((float)msg->val / (float)msg->ext);
 	if (msg->code == ABS_X) {
-		clock_gettime(CLOCK_MONOTONIC_RAW, &g_lastmotion);
 		valuator_mask_set(g_cursor, 0, val*g_rootwidth);
 	}
 	else if (msg->code == ABS_Y) {
-		clock_gettime(CLOCK_MONOTONIC_RAW, &g_lastmotion);
 		valuator_mask_set(g_cursor, 1, val*g_rootheight);
 	}
 }
@@ -316,52 +317,26 @@ static void axis_absolute_post(InputInfoPtr info)
 static void key_event(InputInfoPtr info, struct spr16_msgdata_input *msg)
 {
 	uint32_t k_c;
-
 	/* button range is BTN_0 ... BTN_GEAR_UP, currently only deals with mouse */
 	if (msg->code >= SPR16_KEYCODE_LBTN && msg->code <= SPR16_KEYCODE_CONTACT) {
-		struct timespec elapsed, now;
-		unsigned int usec;
 		switch (msg->code)
 		{
-			case SPR16_KEYCODE_LBTN:
-				k_c = 1;
-				break;
-			case SPR16_KEYCODE_RBTN:
-				k_c = 3; /* xorg right is 3 */
-				break;
-			case SPR16_KEYCODE_CONTACT:
-				/* tap to touch on motion timer */
-				clock_gettime(CLOCK_MONOTONIC_RAW, &now);
-				elapsed.tv_sec  = now.tv_sec - g_lastmotion.tv_sec;
-				if (!elapsed.tv_sec) {
-					elapsed.tv_nsec = now.tv_nsec
-							- g_lastmotion.tv_nsec;
-					usec = elapsed.tv_nsec / 1000;
-				}
-				else {
-					usec = ((1000000000 - g_lastmotion.tv_nsec)
-							+ now.tv_nsec) / 1000;
-					usec += (elapsed.tv_sec-1) * 1000000;
-				}
-				if (msg->val == 0) {
-					k_c = 1;
-				}
-				else if (usec < 300000) { /* 0.3 seconds */
-					k_c = 1;
-				}
-				else {
-					return;
-				}
-				break;
-				/* from evdev driver:
-				 *  BTN_SIDE ... BTN_JOYSTICK  =  8 + code - BTN_SIDE
-				 *  BTN_0 ... BTN_2 = 1 + code - BTN_0
-				 *  BTN_3 ... BTN_MOUSE - 1 = 8 + code - BTN_3
-				 *
-				 */
-			default:
-				k_c = 2; /* xorg middle is 2 */
-				break;
+		case SPR16_KEYCODE_CONTACT:
+		case SPR16_KEYCODE_LBTN:
+			k_c = 1;
+			break;
+		case SPR16_KEYCODE_RBTN:
+			k_c = 3; /* xorg right is 3 */
+			break;
+			/* from evdev driver:
+			 *  BTN_SIDE ... BTN_JOYSTICK  =  8 + code - BTN_SIDE
+			 *  BTN_0 ... BTN_2 = 1 + code - BTN_0
+			 *  BTN_3 ... BTN_MOUSE - 1 = 8 + code - BTN_3
+			 *
+			 */
+		default:
+			k_c = 2; /* xorg middle is 2 */
+			break;
 		}
 		xf86PostButtonEvent(info->dev, Relative, k_c, (msg->val == 1), 0, 0);
 		return;
@@ -376,6 +351,8 @@ static void key_event(InputInfoPtr info, struct spr16_msgdata_input *msg)
 		xf86PostKeyboardEvent(info->dev, k_c, 1);
 	}
 }
+
+
 
 static void sporgReadInput(InputInfoPtr pInfo)
 {
@@ -547,14 +524,13 @@ static int xf86VoidInit(InputDriverPtr drv, InputInfoPtr pInfo,	int flags)
 	char *width;
 	char *height;
 
-	clock_gettime(CLOCK_MONOTONIC_RAW, &g_lastmotion);
-	/* this is hacky for absolute touch dimensions, means we can't resize */
 	fdnum = getenv("SPORG_INPUT_READ");
 	if (fdnum == NULL) {
 		fprintf(stderr, "couldn't locate input descriptor\n");
 		return -1;
 	}
 
+	/* this is hacky for absolute touch dimensions, means we can't resize */
 	width  = getenv("SPORG_WIDTH");
 	height = getenv("SPORG_HEIGHT");
 	if (!width || !height) {
@@ -562,21 +538,24 @@ static int xf86VoidInit(InputDriverPtr drv, InputInfoPtr pInfo,	int flags)
 		return -1;
 	}
 
-	errno = err = 0;
+	errno = 0;
+	err = NULL;
 	input_read_fd = strtol(fdnum, &err, 10);
 	if (err == NULL || *err || errno || input_read_fd < 0) {
 		fprintf(stderr, "erroneous input fdnum\n");
 		return -1;
 	}
 
-	errno = err = 0;
+	errno = 0;
+	err = NULL;
 	g_rootwidth = strtol(width, &err, 10);
 	if (err == NULL || *err || errno
 			|| g_rootwidth < 120 || g_rootwidth > UINT16_MAX) {
 		fprintf(stderr, "bad width env var\n");
 		return -1;
 	}
-	errno = err = 0;
+	errno = 0;
+	err = NULL;
 	g_rootheight = strtol(height, &err, 10);
 	if (err == NULL || *err || errno
 			|| g_rootheight < 120 || g_rootheight > UINT16_MAX) {
@@ -597,6 +576,8 @@ static int xf86VoidInit(InputDriverPtr drv, InputInfoPtr pInfo,	int flags)
 	pInfo->fd = input_read_fd; /* read end (needs O_ASYNC) */
 
 	/* cursor */
+	g_rel_cursor_x = (g_rootwidth/2)  * (float)REL_PRECISION;
+	g_rel_cursor_y = (g_rootheight/2) * (float)REL_PRECISION;
 	g_cursor = valuator_mask_new(CURSOR_COUNT);
 	if (g_cursor == NULL) {
 		fprintf(stderr, "valuator_mask_new: %s\n", STRERR);

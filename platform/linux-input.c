@@ -4,6 +4,7 @@
  */
 #define _GNU_SOURCE
 #include <stdio.h>
+#include <math.h>
 #include <unistd.h>
 #include <fcntl.h>
 #include <stdlib.h>
@@ -12,6 +13,7 @@
 #include <sys/ioctl.h>
 #include <sys/epoll.h>
 #include <sys/types.h>
+#include <time.h>
 #include <linux/input.h>
 #include <dirent.h>
 #include <signal.h>
@@ -25,8 +27,14 @@
 #define LONG_BITS (sizeof(long) * 8)
 #define NLONGS(n) ((n+LONG_BITS-1)/sizeof(long))
 
+#define CURVE_SCALE   1000.0f
+
 const char devpfx[] = "event";
 const char devdir[] = "/dev/input";
+
+#define TAP_DELAY  210000 /* microseconds between last tap up, for tap click */
+#define TAP_STABL  300000 /* delay permitted from last big motion */
+
 struct drv_evdev_pvt {
 	/* surface contacts */
 	int active_contact;
@@ -37,14 +45,32 @@ struct drv_evdev_pvt {
 	int contact_xmax;
 	int contact_ymax;
 	int contact_magmax;
+	int is_mt_surface;
+	int has_pressure;
+
+	int invert_x;
+	int invert_y;
+
 	/* touchpad hw button events, -1 if no event */
 	int touch_lbtn;
 	int touch_rbtn;
 	int touch_mbtn;
-	int is_mt_surface;
-	int has_pressure;
-	int invert_x;
-	int invert_y;
+
+	/* trackpad emulation, convert abs_xy to relative with tap to click */
+	int is_trackpad;
+	int tap_check;
+	int tap_reacquire;
+	float track_x;
+	float track_y;
+	float tap_up_x;
+	float tap_up_y;
+	struct timespec curtime;
+	struct timespec last_tap_up;
+	struct timespec last_bigmotion;
+
+	/* apply acceleration curve to relative axes */
+	int relative_accel;
+
 	unsigned long evbits[NLONGS(EV_CNT)];
 	unsigned long keybits[NLONGS(KEY_CNT)];
 	unsigned long relbits[NLONGS(REL_CNT)];
@@ -118,7 +144,7 @@ interrupted:
 			hdr.type = SPRITEMSG_INPUT;
 			data.code = buf[i];
 			data.type = SPR16_INPUT_KEY_ASCII;
-			data.bits = 0;
+			data.id = self->device_id;
 			if (spr16_write_msg(client, &hdr, &data, sizeof(data))) {
 				return (errno == EAGAIN) ? 0 : -1;
 			}
@@ -135,6 +161,23 @@ static int transceive_raw(struct input_device *self, int client)
 	return -1;
 }
 
+static int usecs_elapsed(struct timespec curtime, struct timespec timestamp)
+{
+	struct timespec elapsed;
+	unsigned int usec;
+
+	elapsed.tv_sec  = curtime.tv_sec - timestamp.tv_sec;
+	if (!elapsed.tv_sec) {
+		elapsed.tv_nsec = curtime.tv_nsec - timestamp.tv_nsec;
+		usec = elapsed.tv_nsec / 1000;
+	}
+	else {
+		usec = ((1000000000 - timestamp.tv_nsec) + curtime.tv_nsec) / 1000;
+		usec += (elapsed.tv_sec-1) * 1000000;
+	}
+	return usec;
+}
+
 static int evdev_translate_btns(struct input_device *self, struct spr16_msgdata_input *msg)
 {
 	struct drv_evdev_pvt *pvt = self->private;
@@ -149,25 +192,47 @@ static int evdev_translate_btns(struct input_device *self, struct spr16_msgdata_
 	else if (pvt->touch_mbtn == msg->code) {
 		msg->code = SPR16_KEYCODE_ABTN;
 		return 0;
-
 	}
+
 	switch (msg->code)
 	{
-		/*case BTN_MOUSE: == BTN_LEFT*/
-		case BTN_LEFT:    msg->code = SPR16_KEYCODE_LBTN; break;
-		case BTN_RIGHT:   msg->code = SPR16_KEYCODE_RBTN; break;
-		case BTN_MIDDLE:  msg->code = SPR16_KEYCODE_ABTN; break;
-		case BTN_BACK:    msg->code = SPR16_KEYCODE_BBTN; break;
-		case BTN_FORWARD: msg->code = SPR16_KEYCODE_CBTN; break;
-		case BTN_SIDE:    msg->code = SPR16_KEYCODE_DBTN; break;
-		case BTN_EXTRA:   msg->code = SPR16_KEYCODE_EBTN; break;
-		case BTN_TASK:    msg->code = SPR16_KEYCODE_FBTN; break;
+	/*case BTN_MOUSE: == BTN_LEFT*/
+	case BTN_LEFT:    msg->code = SPR16_KEYCODE_LBTN; break;
+	case BTN_RIGHT:   msg->code = SPR16_KEYCODE_RBTN; break;
+	case BTN_MIDDLE:  msg->code = SPR16_KEYCODE_ABTN; break;
+	case BTN_BACK:    msg->code = SPR16_KEYCODE_BBTN; break;
+	case BTN_FORWARD: msg->code = SPR16_KEYCODE_CBTN; break;
+	case BTN_SIDE:    msg->code = SPR16_KEYCODE_DBTN; break;
+	case BTN_EXTRA:   msg->code = SPR16_KEYCODE_EBTN; break;
+	case BTN_TASK:    msg->code = SPR16_KEYCODE_FBTN; break;
 
-		case BTN_TOUCH:
+	case BTN_TOUCH: /* TODO use this for detecting touch devices */
+
+		if (!pvt->is_trackpad) {
 			msg->code = SPR16_KEYCODE_CONTACT;
-			  break;
+			break;
+		}
 
-		default: return -1;
+		if (msg->val == 0) {
+			/* contact up */
+			pvt->last_tap_up = pvt->curtime;
+			pvt->tap_reacquire = 4;
+			pvt->tap_up_x = pvt->track_x;
+			pvt->tap_up_y = pvt->track_y;
+			msg->code = SPR16_KEYCODE_CONTACT;
+			break;
+		}
+		else if (usecs_elapsed(pvt->curtime, pvt->last_tap_up)<TAP_DELAY) {
+			if (usecs_elapsed(pvt->curtime, pvt->last_bigmotion)<TAP_STABL) {
+				return -1;
+			}
+			/* send contact down later, after receiving updated positions */
+			pvt->tap_check = 1;
+		}
+		return -1;
+
+	default:
+		return -1;
 	}
 	return 0;
 }
@@ -392,6 +457,93 @@ int preempt_keycodes(struct input_device *self, struct spr16_msgdata_input *msg)
 	return 0;
 }
 
+static float apply_curve(float delta, float min_delta, float max_delta, float slope)
+{
+	float ds, stable_curve;
+
+	/*
+	 * acceleration/stabalization curve
+	 *
+	 *   slope
+	 *   ---------------
+	 *   0.0   flat               .  .  .  .  .  .  .  .
+	 *   3.0   shallow            ,   |
+	 *   10.0  steep              ,   |
+	 *   100.0 freefall          .    |
+	 *                          ,     |
+	 *                    .  , '      |
+	 *                                v
+	 *                              0.1 (10% of surface)
+	 *
+	 *     0.0  < ----  x=delta slope=10.0 y=newdelta ---- > 1.0
+	 */
+	ds = delta * slope;
+	ds = (ds * ds) + min_delta;
+	stable_curve = fmin(max_delta, ds);
+	if (delta < 0.0f)
+		return stable_curve * -1.0f;
+	else
+		return stable_curve;
+
+}
+
+static int abs_to_trackpad(struct drv_evdev_pvt *self,
+			   struct spr16_msgdata_input *msg,
+			   int rel_accel,
+			   float min_delta,
+			   float max_delta,
+			   float phys_size)
+{
+	float fval, delta;
+	int code;
+
+	/* calculate delta */
+	fval = ((float)msg->val / (float)msg->ext);
+	switch (msg->code)
+	{
+		case ABS_X:
+			delta = fval - self->track_x;
+			self->track_x = fval;
+			code = REL_X;
+			break;
+		case ABS_Y:
+			delta = fval - self->track_y;
+			self->track_y = fval;
+			code = REL_Y;
+			break;
+		default:
+			return -1;
+	}
+
+	/* ignore initial coords while re-establishing tracking position */
+	if (self->tap_reacquire > 0) {
+		--self->tap_reacquire;
+		return -1;
+	}
+
+	if (rel_accel) {
+		delta = apply_curve(delta, min_delta, max_delta, phys_size);
+	}
+
+	if (fabs(delta) > min_delta * 12.5) {
+		self->last_bigmotion = self->curtime;
+	}
+	delta *= CURVE_SCALE * REL_PRECISION;
+	msg->type = SPR16_INPUT_AXIS_RELATIVE;
+	msg->code = code;
+	msg->val  = (int)delta;
+	return 0;
+}
+
+static int check_tap_dist(struct drv_evdev_pvt *self, float tapclick_dist)
+{
+	float sx = fabs(self->track_x - self->tap_up_x);
+	float sy = fabs(self->track_y - self->tap_up_y);
+	if (sx <= tapclick_dist && sy <= tapclick_dist)
+		return 1;
+	return 0;
+}
+
 /* convert to 0->max, increases max if min is negative */
 static void clamp_abs(int *val, int *ext, int min, int max, int invert)
 {
@@ -424,7 +576,8 @@ static int get_id(int *id_array, int contact)
 
 /* returns number of surface events consumed */
 static unsigned int consume_surface_report(struct input_device *self, int client,
-		struct input_event *events, unsigned int i, unsigned int count)
+					   struct input_event *events, unsigned int i,
+					   unsigned int count)
 {
 	struct drv_evdev_pvt *pvt = self->private;
 	struct input_event *event;
@@ -446,10 +599,10 @@ static unsigned int consume_surface_report(struct input_device *self, int client
 	active_id = get_id(pvt->contact_ids, active_contact);
 	for (; i < count; ++i)
 	{
-		event = &events[i];
+	event = &events[i];
 	switch (event->code)
 	{
-		case ABS_MT_SLOT:
+	case ABS_MT_SLOT:
 		/* send pending msg */
 		if (send_msg) {
 			/*data.input.code = active_id;*/
@@ -479,7 +632,7 @@ static unsigned int consume_surface_report(struct input_device *self, int client
 
 	case ABS_MT_TRACKING_ID:
 		if (active_contact < 0) {
-			/* initial contact is -1 ! */
+			/* protocol b initial contact is -1 ! */
 			active_contact = 0;
 		}
 
@@ -606,16 +759,26 @@ ret_out:
 	return (i-start);
 }
 
+
 /* TODO SYN_DROPPED!! also hardware repeats are getting ignored by Xorg
  * also, we probably want to EVIOCGRAB, is that essentially locking the device?
  * */
 #define EV_BUF ((EV_MAX+1)*2)
 static int transceive_evdev(struct input_device *self, int client)
 {
+	/* TODO gui+config file settings for these */
+	const float min_delta = 0.000075f; /* % of surface */
+	const float max_delta = 1.0f;
+	const float phys_size = 10.0;
+	const int rel_accel = 1;
+	struct drv_evdev_pvt *pvt = self->private;
 	struct input_event events[EV_BUF];
+	struct spr16_msgdata_input data;
+	struct spr16_msghdr hdr;
 	unsigned int i, count;
 	int r;
 
+	clock_gettime(CLOCK_MONOTONIC_RAW, &pvt->curtime);
 interrupted:
 	r = read(self->fd, events, sizeof(events));
 	if (r == -1) {
@@ -633,10 +796,9 @@ interrupted:
 		return -1;
 	}
 	count = r / sizeof(struct input_event);
+
 	for (i = 0; i < count; ++i)
 	{
-		struct spr16_msgdata_input data;
-		struct spr16_msghdr hdr;
 		struct input_event *event = &events[i];
 		memset(&data, 0, sizeof(data));
 		/* if we get SYN_DROPPED we will have to enter a state where
@@ -645,6 +807,7 @@ interrupted:
 		 * how to test that right now. do we just stop reading?  TODO
 		 */
 		hdr.type = SPRITEMSG_INPUT;
+		data.id = self->device_id;
 		switch (event->type)
 		{
 		case EV_KEY:
@@ -662,6 +825,15 @@ interrupted:
 			data.type = SPR16_INPUT_AXIS_RELATIVE;
 			data.code = event->code;
 			data.val  = event->value;
+			/* TODO hook up raw input option w/ params */
+			if ( 1 || pvt->relative_accel) {
+				float drel = data.val / CURVE_SCALE;
+				drel = apply_curve(drel,0.0001f,0.15f, 15.0f);
+				data.val = (int)(drel * REL_PRECISION * CURVE_SCALE);
+			}
+			else {
+				data.val = data.val * (float)REL_PRECISION;
+			}
 			break;
 
 		case EV_ABS:
@@ -673,14 +845,21 @@ interrupted:
 				i+= consume_surface_report(self,client,events,i,count);
 				continue;
 			}
-			else if (data.code < ABS_CNT) {
-				struct drv_evdev_pvt *pvt = self->private;
-				int min, max;
-				min = pvt->absinfo[data.code].minimum;
-				max = pvt->absinfo[data.code].maximum;
-				clamp_abs(&data.val, &data.ext, min, max, 0);
+			else if (data.code >= ABS_CNT) {
+				continue;
 			}
+			clamp_abs(&data.val, &data.ext,
+					pvt->absinfo[data.code].minimum,
+					pvt->absinfo[data.code].maximum, 0);
 
+			if (pvt->is_trackpad
+					&& (data.code == ABS_X || data.code == ABS_Y)) {
+				/* convert to relative */
+				if (abs_to_trackpad(pvt, &data, rel_accel, min_delta,
+							max_delta, phys_size)) {
+					continue;
+				}
+			}
 			break;
 		case EV_SYN:
 			if (event->code == SYN_DROPPED) {
@@ -703,6 +882,24 @@ interrupted:
 			 * and send all messages once instead of multiple syscalls.
 			 */
 			return (errno == EAGAIN) ? 0 : -1;
+		}
+	}
+
+	/* send trackpad tap click event */
+	if (pvt->is_trackpad && pvt->tap_check) {
+		pvt->tap_check = 0;
+		pvt->tap_reacquire = 0;
+		if (check_tap_dist(pvt, 0.167f)) {
+			memset(&data, 0, sizeof(data));
+			hdr.type = SPRITEMSG_INPUT;
+			data.type = SPR16_INPUT_KEY;
+			data.id   = self->device_id;
+			data.code = SPR16_KEYCODE_CONTACT;
+			data.val  = 1;
+			if (spr16_write_msg(client, &hdr, &data, sizeof(data))) {
+				/* FIXME too  ^^ */
+				return (errno == EAGAIN) ? 0 : -1;
+			}
 		}
 	}
 	return 0;
@@ -919,6 +1116,19 @@ err_close:
 	return NULL;
 }
 
+static int add_device(struct input_device *dev, struct input_device **device_list)
+{
+	static uint8_t g_new_id = 0;
+	if (g_new_id >= UINT8_MAX) {
+		printf("too many devices\n");
+		return -1;
+	}
+	dev->next = *device_list;
+	dev->device_id = ++g_new_id;
+	*device_list = dev;
+	return 0;
+}
+
 /*
  * TODO, check for duplicates, EVIOCGRAB or use owner/group
  */
@@ -1070,7 +1280,7 @@ int evdev_instantiate(struct input_device **device_list,
 	}
 (void)bit_clear;
 #if 0
-	/* ignore regular ABS if multitouch surface */
+	/* ignore regular ABS if multitouch surface*/
 	if (pvt->is_mt_surface) {
 		unsigned long absbits[NLONGS(ABS_CNT)];
 		struct input_mask msk;
@@ -1096,15 +1306,17 @@ int evdev_instantiate(struct input_device **device_list,
 		}
 	}
 #endif
-
+	clock_gettime(CLOCK_MONOTONIC_RAW, &pvt->curtime);
+	pvt->last_tap_up = pvt->curtime;
+	pvt->last_bigmotion = pvt->curtime;
 	snprintf(dev->name, sizeof(dev->name), "%s", devname);
 	snprintf(dev->path, sizeof(dev->path), "%s", devpath);
 	dev->fd = devfd;
 	dev->func_transceive = transceive_evdev;
 	dev->func_flush = generic_flush;
-	dev->next = *device_list;
 	dev->private = pvt;
-	*device_list = dev;
+	if (add_device(dev, device_list))
+		goto err_free;
 	return 0;
 err_free:
 	free(pvt);
@@ -1112,8 +1324,7 @@ err_free:
 	return -1;
 }
 
-
-static void load_stream(struct input_device **device_list, int epoll_fd,
+static int load_stream(struct input_device **device_list, int epoll_fd,
 			int streamfd, int mode)
 {
 	struct epoll_event ev;
@@ -1125,18 +1336,18 @@ static void load_stream(struct input_device **device_list, int epoll_fd,
 	fl = fcntl(streamfd, F_GETFL);
 	if (fl == -1) {
 		printf("fcntl(GETFL): %s\n", STRERR);
-		return;
+		return -1;
 	}
 	if (fcntl(streamfd, F_SETFL, fl | O_NONBLOCK) == -1) {
 		printf("fcntl(SETFL, O_NONBLOCK): %s\n", STRERR);
-		return;
+		return -1;
 	}
 
 	ev.events = EPOLLIN;
 	ev.data.fd = streamfd;
 	if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, streamfd, &ev)) {
 		printf("epoll_ctl(add): %s\n", STRERR);
-		return;
+		return -1;
 	}
 	/*if (tcsetpgrp(streamfd, getpgid(0)) == -1) {
 		printf("tcsetpgrp: %s\n", STRERR);
@@ -1144,7 +1355,7 @@ static void load_stream(struct input_device **device_list, int epoll_fd,
 	}*/
 	dev = calloc(1, sizeof(struct input_device));
 	if (dev == NULL)
-		return;
+		return -1;
 	dev->fd = streamfd;
 	if (mode == 1) {
 		snprintf(dev->name, sizeof(dev->name), "ascii-stream");
@@ -1156,8 +1367,11 @@ static void load_stream(struct input_device **device_list, int epoll_fd,
 		dev->func_transceive  = transceive_raw;
 		dev->func_flush = generic_flush;
 	}
-	dev->next = *device_list;
-	*device_list = dev;
+	if (add_device(dev, device_list)) {
+		free(dev);
+		return -1;
+	}
+	return 0;
 }
 
 void load_linux_input_drivers(struct input_device **device_list,
@@ -1211,7 +1425,15 @@ void load_linux_input_drivers(struct input_device **device_list,
 				printf("evdev instantiate touch failed %s\n", prp->path);
 			}
 			else {
-				printf("using touch device: %s\n", prp->path);
+				if (getenv("EVDEV_TRACKPAD")) {
+					struct drv_evdev_pvt *drv;
+					drv = (*device_list)->private;
+					drv->is_trackpad = 1;
+					printf("using trackpad device: %s\n", prp->path);
+				}
+				else {
+					printf("using touch device: %s\n", prp->path);
+				}
 			}
 		}
 	}

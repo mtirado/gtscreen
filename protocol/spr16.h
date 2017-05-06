@@ -80,8 +80,8 @@ enum {
 /* bit flags
  * TODO so clients don't have to keep rendering if invisible
  */
-#define SPRITE_FLAG_VISIBLE  1
-#define SPRITE_FLAG_INVERT_Y 2
+#define SPRITE_FLAG_VISIBLE  0x01
+#define SPRITE_FLAG_INVERT_Y 0x02
 
 struct spr16_shmem {
 	char *addr;
@@ -158,7 +158,7 @@ struct spr16_msgdata_input {
 	int32_t  ext;
 	uint16_t code;
 	uint8_t  type;
-	uint8_t  bits;
+	uint8_t  id; /* device id */
 };
 
 struct spr16_msgdata_input_surface {
@@ -348,6 +348,9 @@ int spr16_server_shutdown(int listen_fd);
  */
 
 
+/* added precision for acceleration curve, 1 evdev unit == 100 spr16 */
+#define REL_PRECISION 100
+
 /*----------------------------------------------*
  * input drivers                                *
  *----------------------------------------------*/
@@ -369,6 +372,7 @@ struct input_device {
 	void *private; /* first variable always uint32_t type */
 	struct input_device *next;
 	uint32_t keyflags;
+	uint8_t device_id;
 	int fd;
 };
 

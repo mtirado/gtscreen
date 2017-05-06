@@ -96,8 +96,12 @@ all:			\
 ########################################
 # targets
 ########################################
+
+# XXX -lm for floating point is only by gtscreen to calculate relative acceleration
+# and to convert absoulute touch devices to relative trackpads.
+# this can be ifdef'd out or done using some integer technique for systsems without fpu
 $(GTSCREEN):		$(GTSCREEN_OBJS)
-			$(CC) $(DEFINES) $(LDFLAGS) $(GTSCREEN_OBJS) -o $@
+			$(CC) $(DEFINES) -lm $(LDFLAGS) $(GTSCREEN_OBJS) -o $@
 			@echo ""
 			@echo "x---------------------x"
 			@echo "| gtscreen         OK |"

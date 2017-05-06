@@ -382,7 +382,6 @@ int spr16_client_shutdown()
 /* TODO */
 static int surface_emulate_pointer(struct spr16_msgdata_input_surface *msg)
 {
-	printf("TODO emulate pointer\n");
 	(void)msg;
 	if (!g_input_func)
 		return 0;
