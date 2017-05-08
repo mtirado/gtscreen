@@ -206,7 +206,7 @@ static int evdev_translate_btns(struct input_device *self, struct spr16_msgdata_
 	case BTN_EXTRA:   msg->code = SPR16_KEYCODE_EBTN; break;
 	case BTN_TASK:    msg->code = SPR16_KEYCODE_FBTN; break;
 
-	case BTN_TOUCH: /* TODO use this for detecting touch devices */
+	case BTN_TOUCH:
 
 		if (!pvt->is_trackpad) {
 			msg->code = SPR16_KEYCODE_CONTACT;
@@ -832,7 +832,7 @@ interrupted:
 				data.val = (int)(drel * REL_PRECISION * CURVE_SCALE);
 			}
 			else {
-				data.val = data.val * (float)REL_PRECISION;
+				data.val = data.val * REL_PRECISION;
 			}
 			break;
 
@@ -925,6 +925,7 @@ enum {
 struct prospective_path {
 	char path[128];
 	unsigned int key, rel, abs, led, ff;
+	unsigned int surface;
 } g_prospect;
 static void select_prp(struct prospective_path *p, char *path, unsigned int key,
 		unsigned int rel, unsigned int abs, unsigned int ff)
@@ -996,6 +997,41 @@ static int bit_check(unsigned long *arr, uint32_t bit, uint32_t bitcount)
 	return !!(arr[bit / LONG_BITS] & (1LU << (bit % LONG_BITS)));
 }
 
+/* potentially, but not probably */
+static int possibly_keyboard(unsigned long *keybits)
+{
+	int ctrl = bit_check(keybits, KEY_LEFTCTRL, KEY_CNT)
+			|| bit_check(keybits, KEY_RIGHTCTRL, KEY_CNT);
+	int alt = bit_check(keybits, KEY_LEFTALT,  KEY_CNT)
+			|| bit_check(keybits, KEY_RIGHTALT, KEY_CNT);
+
+	if (!ctrl || !alt
+			|| !bit_check(keybits, KEY_SPACE, KEY_CNT)
+			|| !bit_check(keybits, KEY_BACKSPACE, KEY_CNT)
+			|| !bit_check(keybits, KEY_ENTER, KEY_CNT)
+			|| !bit_check(keybits, KEY_TAB, KEY_CNT)
+			|| !bit_check(keybits, KEY_ESC, KEY_CNT)) {
+		return 0;
+	}
+	else {
+		return 1;
+	}
+}
+
+static int probably_surface(unsigned long *absbits, unsigned long *keybits) {
+	int btn = bit_check(keybits, BTN_TOUCH, KEY_CNT);
+	int abs =  (bit_check(absbits, ABS_X, ABS_CNT)
+		 && bit_check(absbits, ABS_Y, ABS_CNT))
+		|| (bit_check(absbits, ABS_MT_POSITION_X, ABS_CNT)
+		 && bit_check(absbits, ABS_MT_POSITION_Y, ABS_CNT));
+	printf("btn %d abs %d\n", btn, abs);
+	if (!btn || !abs) {
+		return 0;
+	}
+	else {
+		return 1;
+	}
+}
 static struct prospective_path *find_most_capable(int cap_class)
 {
 	unsigned long evbits[NLONGS(EV_CNT)];
@@ -1007,7 +1043,7 @@ static struct prospective_path *find_most_capable(int cap_class)
 	unsigned int key = 0;
 	unsigned int rel = 0;
 	unsigned int abs = 0;
-	/*unsigned int led = 0;*/
+	unsigned int led = 0;
 	unsigned int ff  = 0;
 	struct dirent *dent;
 	DIR *dir;
@@ -1052,20 +1088,18 @@ static struct prospective_path *find_most_capable(int cap_class)
 		key = bit_count(keybits, NLONGS(KEY_CNT));
 		abs = bit_count(absbits, NLONGS(ABS_CNT));
 		rel = bit_count(relbits, NLONGS(REL_CNT));
-	/*	led = bit_count(ledbits, NLONGS(LED_CNT));*/
+		led = bit_count(ledbits, NLONGS(LED_CNT));
 		ff  = bit_count(ffbits,  NLONGS(FF_CNT));
 		switch (cap_class)
 		{
 		case CAP_KEYBOARD:
-			/* TODO fix this keyboard detection, arrrgh */
-#if 0
+
+			if (!possibly_keyboard(keybits)) {
+				break;
+			}
 			if (led > g_prospect.led) {
-				/* some keyboards end up making multiple event files
-				 * don't send correct events..... device with LEDs is
-				 * hopefully the real keyboard, and not clone */
 				select_prp(&g_prospect, path, key, rel, abs, ff);
 			}
-#endif
 			if (key > g_prospect.key) {
 				select_prp(&g_prospect, path, key, rel, abs, ff);
 			}
@@ -1090,10 +1124,12 @@ static struct prospective_path *find_most_capable(int cap_class)
 		case CAP_AXIS:
 			break;
 		case CAP_TOUCH:
-			/* TODO multitouch */
-			if (abs > 0 && bit_check(absbits, ABS_X, ABS_CNT)
-				    && bit_check(absbits, ABS_Y, ABS_CNT)) {
+			/* uses the first one found */
+			if (g_prospect.surface)
+				break;
+			if (probably_surface(absbits, keybits)) {
 				select_prp(&g_prospect, path, key, rel, abs, ff);
+				g_prospect.surface = 1;
 			}
 			break;
 		case CAP_FEEDBACK:
@@ -1110,7 +1146,7 @@ static struct prospective_path *find_most_capable(int cap_class)
 		return NULL;
 	return &g_prospect;
 err_close:
-	printf("evdev error: %s\n", STRERR);
+	printf("find capable error: %s\n", STRERR);
 	close(devfd);
 	closedir(dir);
 	return NULL;
@@ -1196,7 +1232,7 @@ int evdev_instantiate(struct input_device **device_list,
 	/*if (bit_check(pvt->evbits, EV_KEY, EV_CNT)) {
 		for (i = 0; i < KEY_CNT; ++i) {
 			if (bit_check(pvt->keybits, i, KEY_CNT)) {
-				printf("KEY %02x\n", i);
+				printf("KEY/BTN %02x\n", i);
 			}
 		}
 	}*/
