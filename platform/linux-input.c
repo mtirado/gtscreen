@@ -489,7 +489,6 @@ static float apply_curve(float delta, float min_delta, float max_delta, float sl
 
 static int abs_to_trackpad(struct drv_evdev_pvt *self,
 			   struct spr16_msgdata_input *msg,
-			   int rel_accel,
 			   float min_delta,
 			   float max_delta,
 			   float phys_size)
@@ -521,7 +520,7 @@ static int abs_to_trackpad(struct drv_evdev_pvt *self,
 		return -1;
 	}
 
-	if (rel_accel) {
+	if (self->relative_accel) {
 		delta = apply_curve(delta, min_delta, max_delta, phys_size);
 	}
 
@@ -770,7 +769,6 @@ static int transceive_evdev(struct input_device *self, int client)
 	const float min_delta = 0.000075f; /* % of surface */
 	const float max_delta = 1.0f;
 	const float phys_size = 10.0;
-	const int rel_accel = 1;
 	struct drv_evdev_pvt *pvt = self->private;
 	struct input_event events[EV_BUF];
 	struct spr16_msgdata_input data;
@@ -825,10 +823,10 @@ interrupted:
 			data.type = SPR16_INPUT_AXIS_RELATIVE;
 			data.code = event->code;
 			data.val  = event->value;
-			/* TODO hook up raw input option w/ params */
-			if ( 1 || pvt->relative_accel) {
+			if (pvt->relative_accel) {
 				float drel = data.val / CURVE_SCALE;
-				drel = apply_curve(drel,0.0001f,0.15f, 15.0f);
+				/* TODO  config settings */
+				drel = apply_curve(drel,0.0003f,0.15f, 14.0f);
 				data.val = (int)(drel * REL_PRECISION * CURVE_SCALE);
 			}
 			else {
@@ -855,7 +853,7 @@ interrupted:
 			if (pvt->is_trackpad
 					&& (data.code == ABS_X || data.code == ABS_Y)) {
 				/* convert to relative */
-				if (abs_to_trackpad(pvt, &data, rel_accel, min_delta,
+				if (abs_to_trackpad(pvt, &data, min_delta,
 							max_delta, phys_size)) {
 					continue;
 				}
@@ -1342,6 +1340,15 @@ int evdev_instantiate(struct input_device **device_list,
 		}
 	}
 #endif
+
+	if (getenv("EVDEV_NOACCEL")) {
+		pvt->relative_accel = 0;
+		printf("relative acceleration disabled\n");
+	}
+	else {
+		pvt->relative_accel = 1;
+	}
+
 	clock_gettime(CLOCK_MONOTONIC_RAW, &pvt->curtime);
 	pvt->last_tap_up = pvt->curtime;
 	pvt->last_bigmotion = pvt->curtime;
