@@ -527,7 +527,7 @@ static int abs_to_trackpad(struct drv_evdev_pvt *self,
 	if (fabs(delta) > min_delta * 12.5) {
 		self->last_bigmotion = self->curtime;
 	}
-	delta *= CURVE_SCALE * REL_PRECISION;
+	delta *= CURVE_SCALE * SPR16_RELATIVE_SCALE;
 	msg->type = SPR16_INPUT_AXIS_RELATIVE;
 	msg->code = code;
 	msg->val  = (int)delta;
@@ -827,10 +827,10 @@ interrupted:
 				float drel = data.val / CURVE_SCALE;
 				/* TODO  config settings */
 				drel = apply_curve(drel,0.0003f,0.15f, 14.0f);
-				data.val = (int)(drel * REL_PRECISION * CURVE_SCALE);
+				data.val = (int)(drel*SPR16_RELATIVE_SCALE*CURVE_SCALE);
 			}
 			else {
-				data.val = data.val * REL_PRECISION;
+				data.val = data.val * SPR16_RELATIVE_SCALE;
 			}
 			break;
 

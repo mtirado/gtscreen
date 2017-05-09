@@ -256,24 +256,25 @@ static void sporg_ascii_mode(InputInfoPtr info, struct spr16_msgdata_input *msg)
 	}
 }
 
-/* TODO user defined acceleration */
 static void axis_relative_accumulate(struct spr16_msgdata_input *msg)
 {
 	if (msg->code == REL_X) {
 		g_rel_cursor_x += msg->val;
-		if (g_rel_cursor_x / (float)REL_PRECISION >= g_rootwidth)
-			g_rel_cursor_x = (g_rootwidth-1) * (float)REL_PRECISION;
+		if (g_rel_cursor_x / (float)SPR16_RELATIVE_SCALE >= g_rootwidth)
+			g_rel_cursor_x = (g_rootwidth-1) * (float)SPR16_RELATIVE_SCALE;
 		else if (g_rel_cursor_x < 0)
 			g_rel_cursor_x = 0;
-		valuator_mask_set(g_cursor, 0, g_rel_cursor_x / (float)REL_PRECISION);
+		valuator_mask_set(g_cursor, 0,
+				g_rel_cursor_x / (float)SPR16_RELATIVE_SCALE);
 	}
 	else if (msg->code == REL_Y) {
 		g_rel_cursor_y += msg->val;
-		if (g_rel_cursor_y / (float)REL_PRECISION >= g_rootheight)
-			g_rel_cursor_y = (g_rootheight-1) * (float)REL_PRECISION;
+		if (g_rel_cursor_y / (float)SPR16_RELATIVE_SCALE >= g_rootheight)
+			g_rel_cursor_y = (g_rootheight-1) * (float)SPR16_RELATIVE_SCALE;
 		else if (g_rel_cursor_y < 0)
 			g_rel_cursor_y = 0;
-		valuator_mask_set(g_cursor, 1, g_rel_cursor_y / (float)REL_PRECISION);
+		valuator_mask_set(g_cursor, 1,
+				g_rel_cursor_y / (float)SPR16_RELATIVE_SCALE);
 	}
 	else if (msg->code == REL_WHEEL) {
 		valuator_mask_set(g_cursor, CURSOR_Z, -msg->val);
@@ -576,8 +577,8 @@ static int xf86VoidInit(InputDriverPtr drv, InputInfoPtr pInfo,	int flags)
 	pInfo->fd = input_read_fd; /* read end (needs O_ASYNC) */
 
 	/* cursor */
-	g_rel_cursor_x = (g_rootwidth/2)  * (float)REL_PRECISION;
-	g_rel_cursor_y = (g_rootheight/2) * (float)REL_PRECISION;
+	g_rel_cursor_x = (g_rootwidth/2)  * (float)SPR16_RELATIVE_SCALE;
+	g_rel_cursor_y = (g_rootheight/2) * (float)SPR16_RELATIVE_SCALE;
 	g_cursor = valuator_mask_new(CURSOR_COUNT);
 	if (g_cursor == NULL) {
 		fprintf(stderr, "valuator_mask_new: %s\n", STRERR);

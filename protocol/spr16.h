@@ -41,6 +41,14 @@
 #define SPR16_ACK  1
 #define SPR16_NACK 0
 #define SPR16_MAXCLIENTS 128
+
+
+/* added precision for acceleration curve, 1 hardware unit == 10 spr16
+ * don't change this, it should be safe to assume this is universally 10
+ */
+#define SPR16_RELATIVE_SCALE 10
+
+
 /* TODO set sticky bit and check that, + perms like xephyr does ;)
  *
  * */
@@ -347,9 +355,6 @@ int spr16_server_shutdown(int listen_fd);
  *   disconnect ------------------------> X
  */
 
-
-/* added precision for acceleration curve, 1 evdev unit == 100 spr16 */
-#define REL_PRECISION 100
 
 /*----------------------------------------------*
  * input drivers                                *
