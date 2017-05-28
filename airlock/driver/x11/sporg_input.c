@@ -63,7 +63,7 @@
 #include <xorg/xkbsrv.h>
 #define STRERR strerror(errno)
 
-
+#define POST_ABS 1
 enum {
 	CURSOR_X = 0,
 	CURSOR_Y,
@@ -256,29 +256,39 @@ static void sporg_ascii_mode(InputInfoPtr info, struct spr16_msgdata_input *msg)
 	}
 }
 
-static void axis_relative_accumulate(struct spr16_msgdata_input *msg)
+static unsigned int axis_relative_accumulate(InputInfoPtr info, struct spr16_msgdata_input *msg)
 {
-	if (msg->code == REL_X) {
+	switch (msg->code)
+	{
+	case REL_X:
 		g_rel_cursor_x += msg->val;
 		if (g_rel_cursor_x / (float)SPR16_RELATIVE_SCALE >= g_rootwidth)
 			g_rel_cursor_x = (g_rootwidth-1) * (float)SPR16_RELATIVE_SCALE;
 		else if (g_rel_cursor_x < 0)
 			g_rel_cursor_x = 0;
-		valuator_mask_set(g_cursor, 0,
+		valuator_mask_set(g_cursor, CURSOR_X,
 				g_rel_cursor_x / (float)SPR16_RELATIVE_SCALE);
-	}
-	else if (msg->code == REL_Y) {
+		return POST_ABS;
+	case REL_Y:
 		g_rel_cursor_y += msg->val;
 		if (g_rel_cursor_y / (float)SPR16_RELATIVE_SCALE >= g_rootheight)
 			g_rel_cursor_y = (g_rootheight-1) * (float)SPR16_RELATIVE_SCALE;
 		else if (g_rel_cursor_y < 0)
 			g_rel_cursor_y = 0;
-		valuator_mask_set(g_cursor, 1,
+		valuator_mask_set(g_cursor, CURSOR_Y,
 				g_rel_cursor_y / (float)SPR16_RELATIVE_SCALE);
-	}
-	else if (msg->code == REL_WHEEL) {
+		return POST_ABS;
+
+	case REL_WHEEL:
+		/* post as normal relative event */
+		fprintf(stderr, "rel wheelval: %f\n", -msg->val / (float)SPR16_RELATIVE_SCALE);
 		valuator_mask_set(g_cursor, CURSOR_Z,
 				-msg->val / (float)SPR16_RELATIVE_SCALE);
+		xf86PostMotionEventM(info->dev, Relative, g_cursor);
+		valuator_mask_zero(g_cursor);
+		return 0;
+	default:
+		return 0;
 	}
 	/* both horizontal?
 	 * else if (msg->code == REL_DIAL) {
@@ -291,13 +301,7 @@ static void axis_relative_accumulate(struct spr16_msgdata_input *msg)
 	}*/
 }
 
-static void axis_relative_post(InputInfoPtr info)
-{
-	xf86PostMotionEventM(info->dev, Absolute, g_cursor);
-	valuator_mask_zero(g_cursor);
-}
-
-static void axis_absolute(struct spr16_msgdata_input *msg)
+static unsigned int axis_absolute(struct spr16_msgdata_input *msg)
 {
 	float val;
 	msg->ext = (msg->ext ? msg->ext : 1);
@@ -308,6 +312,7 @@ static void axis_absolute(struct spr16_msgdata_input *msg)
 	else if (msg->code == ABS_Y) {
 		valuator_mask_set(g_cursor, 1, val*g_rootheight);
 	}
+	return POST_ABS;
 }
 
 static void axis_absolute_post(InputInfoPtr info)
@@ -354,13 +359,10 @@ static void key_event(InputInfoPtr info, struct spr16_msgdata_input *msg)
 	}
 }
 
-
-
 static void sporgReadInput(InputInfoPtr pInfo)
 {
 	struct spr16_msgdata_input msgs[1024];
-	int post_relative = 0;
-	int post_absolute = 0;
+	unsigned int post_flags = 0;
 	int bytes;
 	unsigned int i;
 intr:
@@ -378,12 +380,10 @@ intr:
 		switch (msgs[i].type)
 		{
 		case SPR16_INPUT_AXIS_RELATIVE:
-			axis_relative_accumulate(&msgs[i]);
-			post_relative = 1;
+			post_flags |= axis_relative_accumulate(pInfo, &msgs[i]);
 			break;
 		case SPR16_INPUT_AXIS_ABSOLUTE:
-			axis_absolute(&msgs[i]);
-			post_absolute = 1;
+			post_flags |= axis_absolute(&msgs[i]);
 			break;
 		case SPR16_INPUT_KEY:
 			key_event(pInfo, &msgs[i]);
@@ -396,9 +396,7 @@ intr:
 			break;
 		}
 	}
-	if (post_relative)
-		axis_relative_post(pInfo);
-	if (post_absolute)
+	if (post_flags & POST_ABS)
 		axis_absolute_post(pInfo);
 	return;
 }

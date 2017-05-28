@@ -99,7 +99,7 @@ int read_environ()
 {
 	char *estr = NULL;
 	char *err = NULL;
-	int vscroll_amount     = 10;
+	int vscroll_amount     = 30;
 	uint16_t pointer_accel = 0;
 	uint16_t req_width     = 0;
 	uint16_t req_height    = 0;
@@ -321,7 +321,6 @@ int main(int argc, char *argv[])
 	g_running = 1;
 	memset(&g_state, 0, sizeof(g_state));
 	memset(&g_server, 0, sizeof(g_server));
-	g_server.vscroll_amount = 2;
 
 	/* line buffer output */
 	setvbuf(stdout, NULL, _IOLBF, 0);
