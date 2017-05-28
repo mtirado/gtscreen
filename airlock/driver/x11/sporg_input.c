@@ -277,7 +277,8 @@ static void axis_relative_accumulate(struct spr16_msgdata_input *msg)
 				g_rel_cursor_y / (float)SPR16_RELATIVE_SCALE);
 	}
 	else if (msg->code == REL_WHEEL) {
-		valuator_mask_set(g_cursor, CURSOR_Z, -msg->val);
+		valuator_mask_set(g_cursor, CURSOR_Z,
+				-msg->val / (float)SPR16_RELATIVE_SCALE);
 	}
 	/* both horizontal?
 	 * else if (msg->code == REL_DIAL) {

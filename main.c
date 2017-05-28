@@ -99,17 +99,18 @@ int read_environ()
 {
 	char *estr = NULL;
 	char *err = NULL;
-	int vscroll_amount   = 1;
-	uint16_t req_width   = 0;
-	uint16_t req_height  = 0;
-	uint16_t req_refresh = 60;
+	int vscroll_amount     = 10;
+	uint16_t pointer_accel = 0;
+	uint16_t req_width     = 0;
+	uint16_t req_height    = 0;
+	uint16_t req_refresh   = 60;
 
-	estr = getenv("SPR16_VSCROLL");
+	estr = getenv("SPR16_POINTER_VSCROLL");
 	if (estr != NULL) {
 		errno = 0;
 		vscroll_amount = strtol(estr, &err, 10);
-		if (err == NULL || *err || errno || vscroll_amount == 0) {
-			printf("erroneous environ SPR16_VSCROLL\n");
+		if (err == NULL || *err || errno) {
+			printf("erroneous environ SPR16_POINTER_VSCROLL\n");
 				return -1;
 		}
 		if (vscroll_amount < -50)
@@ -149,7 +150,16 @@ int read_environ()
 				return -1;
 		}
 	}
-
+	estr = getenv("SPR16_POINTER_ACCEL");
+	if (estr != NULL) {
+		errno = 0;
+		pointer_accel = strtol(estr, &err, 10);
+		if (err == NULL || *err || errno) {
+			printf("erroneous environ SPR16_POINTER_ACCEL\n");
+				return -1;
+		}
+	}
+	g_server.pointer_accel   = pointer_accel;
 	g_server.vscroll_amount  = vscroll_amount;
 	g_server.request_width   = req_width;
 	g_server.request_height  = req_height;
@@ -270,7 +280,8 @@ static void print_usage()
 	printf("    SPR16_SCREEN_WIDTH        preferred screen width\n");
 	printf("    SPR16_SCREEN_HEIGHT       preferred screen height\n");
 	printf("    SPR16_SCREEN_REFRESH      target refresh rate\n");
-	printf("    SPR16_SCREEN_VSCROLL      vertical scroll(wheel) amount\n");
+	printf("    SPR16_POINTER_VSCROLL     vertical scroll minimum\n");
+	printf("    SPR16_POINTER_ACCEL       pointer acceleration\n");
 	printf("\n");
 }
 

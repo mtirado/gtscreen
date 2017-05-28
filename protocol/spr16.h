@@ -301,10 +301,8 @@ int spr16_client_input(struct spr16_msgdata_input *msg);
 int spr16_client_input_surface(struct spr16_msgdata_input_surface *msg);
 int spr16_client_set_servinfo_handler(servinfo_handler func);
 
+/* input callbacks */
 int spr16_client_set_input_handler(input_handler func);
-/* TODO
- * if surface handler is unset, events should be translated and passed
- * to input_handler as a regular pointer, and add tap to click env var */
 int spr16_client_set_input_surface_handler(input_surface_handler func);
 
 
@@ -317,6 +315,7 @@ struct server
 	uint16_t request_width;
 	uint16_t request_height;
 	uint16_t request_refresh;
+	int pointer_accel;
 	int vscroll_amount;
 };
 struct client
@@ -352,7 +351,7 @@ int spr16_server_shutdown(int listen_fd);
  *   sync_region(id,x,y,w,h) ---------->  |
  *   sync_region(id,x,y,w,h) ---------->  |
  *   |  <-------------------------------- nack
- *   disconnect ------------------------> X
+ *   X
  */
 
 

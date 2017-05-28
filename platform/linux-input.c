@@ -35,6 +35,14 @@ const char devdir[] = "/dev/input";
 #define TAP_DELAY  210000 /* microseconds between last tap up, for tap click */
 #define TAP_STABL  300000 /* delay permitted from last big motion */
 
+extern struct server g_server;
+
+/* high level input device classification */
+enum {
+	SPR16_DEV_KEYBOARD = 1,
+	SPR16_DEV_MOUSE,
+	SPR16_DEV_TOUCH
+};
 struct drv_evdev_pvt {
 	/* surface contacts */
 	int active_contact;
@@ -68,8 +76,9 @@ struct drv_evdev_pvt {
 	struct timespec last_tap_up;
 	struct timespec last_bigmotion;
 
-	/* apply acceleration curve to relative axes */
-	int relative_accel;
+	/* accelerate x/y pointer (TODO arbitrary axis/devices) */
+	unsigned int relative_accel;
+	unsigned int vscroll_amount;
 
 	unsigned long evbits[NLONGS(EV_CNT)];
 	unsigned long keybits[NLONGS(KEY_CNT)];
@@ -241,11 +250,9 @@ static int evdev_translate_keycode(struct input_device *self,
 				   struct spr16_msgdata_input *msg)
 {
 	uint32_t shift = 0;
+	/* TODO still missing some important keys */
 	switch (msg->code)
 	{
-		/* chars > 127
-		 * TODO still missing some important keys
-		 */
 	case KEY_LEFTALT:
 		msg->code = SPR16_KEYCODE_LALT;
 		if (msg->val == 0) {
@@ -256,6 +263,7 @@ static int evdev_translate_keycode(struct input_device *self,
 			self->keyflags |= SPR16_KEYMOD_LALT;
 		}
 		break;
+
 	case KEY_LEFTCTRL:
 		msg->code = SPR16_KEYCODE_LCTRL;
 		if (msg->val == 0) {
@@ -267,126 +275,126 @@ static int evdev_translate_keycode(struct input_device *self,
 		}
 		break;
 
-		case KEY_CAPSLOCK:   msg->code = SPR16_KEYCODE_CAPSLOCK; break;
-		case KEY_LEFTSHIFT:  msg->code = SPR16_KEYCODE_LSHIFT;   break;
-		case KEY_RIGHTSHIFT: msg->code = SPR16_KEYCODE_RSHIFT;   break;
-		case KEY_RIGHTCTRL:  msg->code = SPR16_KEYCODE_RCTRL;    break;
-		case KEY_RIGHTALT:   msg->code = SPR16_KEYCODE_RALT;     break;
-		case KEY_UP: 	     msg->code = SPR16_KEYCODE_UP;       break;
-		case KEY_DOWN:       msg->code = SPR16_KEYCODE_DOWN;     break;
-		case KEY_LEFT:       msg->code = SPR16_KEYCODE_LEFT;     break;
-		case KEY_RIGHT:      msg->code = SPR16_KEYCODE_RIGHT;    break;
-		case KEY_PAGEUP:     msg->code = SPR16_KEYCODE_PAGEUP;   break;
-		case KEY_PAGEDOWN:   msg->code = SPR16_KEYCODE_PAGEDOWN; break;
-		case KEY_HOME:       msg->code = SPR16_KEYCODE_HOME;     break;
-		case KEY_END:        msg->code = SPR16_KEYCODE_END;      break;
-		case KEY_INSERT:     msg->code = SPR16_KEYCODE_INSERT;   break;
-		case KEY_DELETE:     msg->code = SPR16_KEYCODE_DELETE;   break;
+	case KEY_CAPSLOCK:   msg->code = SPR16_KEYCODE_CAPSLOCK; break;
+	case KEY_LEFTSHIFT:  msg->code = SPR16_KEYCODE_LSHIFT;   break;
+	case KEY_RIGHTSHIFT: msg->code = SPR16_KEYCODE_RSHIFT;   break;
+	case KEY_RIGHTCTRL:  msg->code = SPR16_KEYCODE_RCTRL;    break;
+	case KEY_RIGHTALT:   msg->code = SPR16_KEYCODE_RALT;     break;
+	case KEY_UP: 	     msg->code = SPR16_KEYCODE_UP;       break;
+	case KEY_DOWN:       msg->code = SPR16_KEYCODE_DOWN;     break;
+	case KEY_LEFT:       msg->code = SPR16_KEYCODE_LEFT;     break;
+	case KEY_RIGHT:      msg->code = SPR16_KEYCODE_RIGHT;    break;
+	case KEY_PAGEUP:     msg->code = SPR16_KEYCODE_PAGEUP;   break;
+	case KEY_PAGEDOWN:   msg->code = SPR16_KEYCODE_PAGEDOWN; break;
+	case KEY_HOME:       msg->code = SPR16_KEYCODE_HOME;     break;
+	case KEY_END:        msg->code = SPR16_KEYCODE_END;      break;
+	case KEY_INSERT:     msg->code = SPR16_KEYCODE_INSERT;   break;
+	case KEY_DELETE:     msg->code = SPR16_KEYCODE_DELETE;   break;
 
-		case KEY_NUMLOCK:     msg->code = SPR16_KEYCODE_NUMLOCK;    break;
-		case KEY_KP0:         msg->code = SPR16_KEYCODE_NP0;        break;
-		case KEY_KP1:         msg->code = SPR16_KEYCODE_NP1;        break;
-		case KEY_KP2:         msg->code = SPR16_KEYCODE_NP2;        break;
-		case KEY_KP3:         msg->code = SPR16_KEYCODE_NP3;        break;
-		case KEY_KP4:         msg->code = SPR16_KEYCODE_NP4;        break;
-		case KEY_KP5:         msg->code = SPR16_KEYCODE_NP5;        break;
-		case KEY_KP6:         msg->code = SPR16_KEYCODE_NP6;        break;
-		case KEY_KP7:         msg->code = SPR16_KEYCODE_NP7;        break;
-		case KEY_KP8:         msg->code = SPR16_KEYCODE_NP8;        break;
-		case KEY_KP9:         msg->code = SPR16_KEYCODE_NP9;        break;
-		case KEY_KPSLASH:     msg->code = SPR16_KEYCODE_NPSLASH;    break;
-		case KEY_KPASTERISK:  msg->code = SPR16_KEYCODE_NPASTERISK; break;
-		case KEY_KPPLUS:      msg->code = SPR16_KEYCODE_NPPLUS;     break;
-		case KEY_KPMINUS:     msg->code = SPR16_KEYCODE_NPMINUS;    break;
-		case KEY_KPDOT:       msg->code = SPR16_KEYCODE_NPDOT;      break;
-		case KEY_KPENTER:     msg->code = SPR16_KEYCODE_NPENTER;    break;
+	case KEY_NUMLOCK:     msg->code = SPR16_KEYCODE_NUMLOCK;    break;
+	case KEY_KP0:         msg->code = SPR16_KEYCODE_NP0;        break;
+	case KEY_KP1:         msg->code = SPR16_KEYCODE_NP1;        break;
+	case KEY_KP2:         msg->code = SPR16_KEYCODE_NP2;        break;
+	case KEY_KP3:         msg->code = SPR16_KEYCODE_NP3;        break;
+	case KEY_KP4:         msg->code = SPR16_KEYCODE_NP4;        break;
+	case KEY_KP5:         msg->code = SPR16_KEYCODE_NP5;        break;
+	case KEY_KP6:         msg->code = SPR16_KEYCODE_NP6;        break;
+	case KEY_KP7:         msg->code = SPR16_KEYCODE_NP7;        break;
+	case KEY_KP8:         msg->code = SPR16_KEYCODE_NP8;        break;
+	case KEY_KP9:         msg->code = SPR16_KEYCODE_NP9;        break;
+	case KEY_KPSLASH:     msg->code = SPR16_KEYCODE_NPSLASH;    break;
+	case KEY_KPASTERISK:  msg->code = SPR16_KEYCODE_NPASTERISK; break;
+	case KEY_KPPLUS:      msg->code = SPR16_KEYCODE_NPPLUS;     break;
+	case KEY_KPMINUS:     msg->code = SPR16_KEYCODE_NPMINUS;    break;
+	case KEY_KPDOT:       msg->code = SPR16_KEYCODE_NPDOT;      break;
+	case KEY_KPENTER:     msg->code = SPR16_KEYCODE_NPENTER;    break;
 
 
-		case KEY_F1:  msg->code = SPR16_KEYCODE_F1;  break;
-		case KEY_F2:  msg->code = SPR16_KEYCODE_F2;  break;
-		case KEY_F3:  msg->code = SPR16_KEYCODE_F3;  break;
-		case KEY_F4:  msg->code = SPR16_KEYCODE_F4;  break;
-		case KEY_F5:  msg->code = SPR16_KEYCODE_F5;  break;
-		case KEY_F6:  msg->code = SPR16_KEYCODE_F6;  break;
-		case KEY_F7:  msg->code = SPR16_KEYCODE_F7;  break;
-		case KEY_F8:  msg->code = SPR16_KEYCODE_F8;  break;
-		case KEY_F9:  msg->code = SPR16_KEYCODE_F9;  break;
-		case KEY_F10: msg->code = SPR16_KEYCODE_F10; break;
-		case KEY_F11: msg->code = SPR16_KEYCODE_F11; break;
-		case KEY_F12: msg->code = SPR16_KEYCODE_F12; break;
-		case KEY_F13: msg->code = SPR16_KEYCODE_F13; break;
-		case KEY_F14: msg->code = SPR16_KEYCODE_F14; break;
-		case KEY_F15: msg->code = SPR16_KEYCODE_F15; break;
-		case KEY_F16: msg->code = SPR16_KEYCODE_F16; break;
-		case KEY_F17: msg->code = SPR16_KEYCODE_F17; break;
-		case KEY_F18: msg->code = SPR16_KEYCODE_F18; break;
-		case KEY_F19: msg->code = SPR16_KEYCODE_F19; break;
-		case KEY_F20: msg->code = SPR16_KEYCODE_F20; break;
-		case KEY_F21: msg->code = SPR16_KEYCODE_F21; break;
-		case KEY_F22: msg->code = SPR16_KEYCODE_F22; break;
-		case KEY_F23: msg->code = SPR16_KEYCODE_F23; break;
-		case KEY_F24: msg->code = SPR16_KEYCODE_F24; break;
+	case KEY_F1:  msg->code = SPR16_KEYCODE_F1;  break;
+	case KEY_F2:  msg->code = SPR16_KEYCODE_F2;  break;
+	case KEY_F3:  msg->code = SPR16_KEYCODE_F3;  break;
+	case KEY_F4:  msg->code = SPR16_KEYCODE_F4;  break;
+	case KEY_F5:  msg->code = SPR16_KEYCODE_F5;  break;
+	case KEY_F6:  msg->code = SPR16_KEYCODE_F6;  break;
+	case KEY_F7:  msg->code = SPR16_KEYCODE_F7;  break;
+	case KEY_F8:  msg->code = SPR16_KEYCODE_F8;  break;
+	case KEY_F9:  msg->code = SPR16_KEYCODE_F9;  break;
+	case KEY_F10: msg->code = SPR16_KEYCODE_F10; break;
+	case KEY_F11: msg->code = SPR16_KEYCODE_F11; break;
+	case KEY_F12: msg->code = SPR16_KEYCODE_F12; break;
+	case KEY_F13: msg->code = SPR16_KEYCODE_F13; break;
+	case KEY_F14: msg->code = SPR16_KEYCODE_F14; break;
+	case KEY_F15: msg->code = SPR16_KEYCODE_F15; break;
+	case KEY_F16: msg->code = SPR16_KEYCODE_F16; break;
+	case KEY_F17: msg->code = SPR16_KEYCODE_F17; break;
+	case KEY_F18: msg->code = SPR16_KEYCODE_F18; break;
+	case KEY_F19: msg->code = SPR16_KEYCODE_F19; break;
+	case KEY_F20: msg->code = SPR16_KEYCODE_F20; break;
+	case KEY_F21: msg->code = SPR16_KEYCODE_F21; break;
+	case KEY_F22: msg->code = SPR16_KEYCODE_F22; break;
+	case KEY_F23: msg->code = SPR16_KEYCODE_F23; break;
+	case KEY_F24: msg->code = SPR16_KEYCODE_F24; break;
 
-		/*case KEY_KPASTERISK: msg->code =  break;*/
-		/*case KEY_CAPSLOCK:   msg->code = shift ? '' : ''; break;*/
+	/*case KEY_KPASTERISK: msg->code =  break;*/
+	/*case KEY_CAPSLOCK:   msg->code = shift ? '' : ''; break;*/
 
-		/* chars <= 127 */
-		case KEY_ESC: msg->code = 27; break;  /* ascii escape code */
-		case KEY_0: msg->code = shift ? ')' : '0'; break;
-		case KEY_1: msg->code = shift ? '!' : '1'; break;
-		case KEY_2: msg->code = shift ? '@' : '2'; break;
-		case KEY_3: msg->code = shift ? '#' : '3'; break;
-		case KEY_4: msg->code = shift ? '$' : '4'; break;
-		case KEY_5: msg->code = shift ? '%' : '5'; break;
-		case KEY_6: msg->code = shift ? '^' : '6'; break;
-		case KEY_7: msg->code = shift ? '&' : '7'; break;
+	/* chars <= 127 */
+	case KEY_ESC: msg->code = 27; break;  /* ascii escape code */
+	case KEY_0: msg->code = shift ? ')' : '0'; break;
+	case KEY_1: msg->code = shift ? '!' : '1'; break;
+	case KEY_2: msg->code = shift ? '@' : '2'; break;
+	case KEY_3: msg->code = shift ? '#' : '3'; break;
+	case KEY_4: msg->code = shift ? '$' : '4'; break;
+	case KEY_5: msg->code = shift ? '%' : '5'; break;
+	case KEY_6: msg->code = shift ? '^' : '6'; break;
+	case KEY_7: msg->code = shift ? '&' : '7'; break;
 		case KEY_8: msg->code = shift ? '*' : '8'; break;
-		case KEY_9: msg->code = shift ? '(' : '9'; break;
+	case KEY_9: msg->code = shift ? '(' : '9'; break;
 
-		case KEY_MINUS:      msg->code = shift ? '_'  : '-' ; break;
-		case KEY_EQUAL:      msg->code = shift ? '+'  : '=' ; break;
-		case KEY_BACKSPACE:  msg->code = shift ? '\b' : '\b'; break;
-		case KEY_TAB:        msg->code = shift ? '\t' : '\t'; break;
-		case KEY_LEFTBRACE:  msg->code = shift ? '{'  : '[' ; break;
-		case KEY_RIGHTBRACE: msg->code = shift ? '}'  : ']' ; break;
-		case KEY_ENTER:      msg->code = shift ? '\n' : '\n'; break;
-		case KEY_SEMICOLON:  msg->code = shift ? ':'  : ';' ; break;
-		case KEY_APOSTROPHE: msg->code = shift ? '"'  : '\''; break;
-		case KEY_GRAVE:      msg->code = shift ? '~'  : '`' ; break;
-		case KEY_BACKSLASH:  msg->code = shift ? '|'  : '\\'; break;
-		case KEY_COMMA:      msg->code = shift ? '<'  : ',' ; break;
-		case KEY_DOT:        msg->code = shift ? '>'  : '.' ; break;
-		case KEY_SLASH:      msg->code = shift ? '?'  : '/' ; break;
-		case KEY_SPACE:      msg->code = shift ? ' '  : ' ' ; break;
+	case KEY_MINUS:      msg->code = shift ? '_'  : '-' ; break;
+	case KEY_EQUAL:      msg->code = shift ? '+'  : '=' ; break;
+	case KEY_BACKSPACE:  msg->code = shift ? '\b' : '\b'; break;
+	case KEY_TAB:        msg->code = shift ? '\t' : '\t'; break;
+	case KEY_LEFTBRACE:  msg->code = shift ? '{'  : '[' ; break;
+	case KEY_RIGHTBRACE: msg->code = shift ? '}'  : ']' ; break;
+	case KEY_ENTER:      msg->code = shift ? '\n' : '\n'; break;
+	case KEY_SEMICOLON:  msg->code = shift ? ':'  : ';' ; break;
+	case KEY_APOSTROPHE: msg->code = shift ? '"'  : '\''; break;
+	case KEY_GRAVE:      msg->code = shift ? '~'  : '`' ; break;
+	case KEY_BACKSLASH:  msg->code = shift ? '|'  : '\\'; break;
+	case KEY_COMMA:      msg->code = shift ? '<'  : ',' ; break;
+	case KEY_DOT:        msg->code = shift ? '>'  : '.' ; break;
+	case KEY_SLASH:      msg->code = shift ? '?'  : '/' ; break;
+	case KEY_SPACE:      msg->code = shift ? ' '  : ' ' ; break;
 
-		case KEY_A: msg->code = shift ? 'A' : 'a'; break;
-		case KEY_B: msg->code = shift ? 'B' : 'b'; break;
-		case KEY_C: msg->code = shift ? 'C' : 'c'; break;
-		case KEY_D: msg->code = shift ? 'D' : 'd'; break;
-		case KEY_E: msg->code = shift ? 'E' : 'e'; break;
-		case KEY_F: msg->code = shift ? 'F' : 'f'; break;
-		case KEY_G: msg->code = shift ? 'G' : 'g'; break;
-		case KEY_H: msg->code = shift ? 'H' : 'h'; break;
-		case KEY_I: msg->code = shift ? 'I' : 'i'; break;
-		case KEY_J: msg->code = shift ? 'J' : 'j'; break;
-		case KEY_K: msg->code = shift ? 'K' : 'k'; break;
-		case KEY_L: msg->code = shift ? 'L' : 'l'; break;
-		case KEY_M: msg->code = shift ? 'M' : 'm'; break;
-		case KEY_N: msg->code = shift ? 'N' : 'n'; break;
-		case KEY_O: msg->code = shift ? 'O' : 'o'; break;
-		case KEY_P: msg->code = shift ? 'P' : 'p'; break;
-		case KEY_Q: msg->code = shift ? 'Q' : 'q'; break;
-		case KEY_R: msg->code = shift ? 'R' : 'r'; break;
-		case KEY_S: msg->code = shift ? 'S' : 's'; break;
-		case KEY_T: msg->code = shift ? 'T' : 't'; break;
-		case KEY_U: msg->code = shift ? 'U' : 'u'; break;
-		case KEY_V: msg->code = shift ? 'V' : 'v'; break;
-		case KEY_W: msg->code = shift ? 'W' : 'w'; break;
-		case KEY_X: msg->code = shift ? 'X' : 'x'; break;
-		case KEY_Y: msg->code = shift ? 'Y' : 'Y'; break;
-		case KEY_Z: msg->code = shift ? 'Z' : 'z'; break;
+	case KEY_A: msg->code = shift ? 'A' : 'a'; break;
+	case KEY_B: msg->code = shift ? 'B' : 'b'; break;
+	case KEY_C: msg->code = shift ? 'C' : 'c'; break;
+	case KEY_D: msg->code = shift ? 'D' : 'd'; break;
+	case KEY_E: msg->code = shift ? 'E' : 'e'; break;
+	case KEY_F: msg->code = shift ? 'F' : 'f'; break;
+	case KEY_G: msg->code = shift ? 'G' : 'g'; break;
+	case KEY_H: msg->code = shift ? 'H' : 'h'; break;
+	case KEY_I: msg->code = shift ? 'I' : 'i'; break;
+	case KEY_J: msg->code = shift ? 'J' : 'j'; break;
+	case KEY_K: msg->code = shift ? 'K' : 'k'; break;
+	case KEY_L: msg->code = shift ? 'L' : 'l'; break;
+	case KEY_M: msg->code = shift ? 'M' : 'm'; break;
+	case KEY_N: msg->code = shift ? 'N' : 'n'; break;
+	case KEY_O: msg->code = shift ? 'O' : 'o'; break;
+	case KEY_P: msg->code = shift ? 'P' : 'p'; break;
+	case KEY_Q: msg->code = shift ? 'Q' : 'q'; break;
+	case KEY_R: msg->code = shift ? 'R' : 'r'; break;
+	case KEY_S: msg->code = shift ? 'S' : 's'; break;
+	case KEY_T: msg->code = shift ? 'T' : 't'; break;
+	case KEY_U: msg->code = shift ? 'U' : 'u'; break;
+	case KEY_V: msg->code = shift ? 'V' : 'v'; break;
+	case KEY_W: msg->code = shift ? 'W' : 'w'; break;
+	case KEY_X: msg->code = shift ? 'X' : 'x'; break;
+	case KEY_Y: msg->code = shift ? 'Y' : 'Y'; break;
+	case KEY_Z: msg->code = shift ? 'Z' : 'z'; break;
 
-		default: return evdev_translate_btns(self, msg);
+	default: return evdev_translate_btns(self, msg);
 	}
 	return 0;
 }
@@ -823,10 +831,21 @@ interrupted:
 			data.type = SPR16_INPUT_AXIS_RELATIVE;
 			data.code = event->code;
 			data.val  = event->value;
+
+			/* scroll wheel */
+			if (pvt->vscroll_amount && data.code == REL_WHEEL) {
+				if (data.val > 0)
+					data.val = pvt->vscroll_amount;
+				else
+					data.val = -pvt->vscroll_amount;
+				break; /* no accel if amount is specified */
+			}
+
+			/* not scroll wheel */
 			if (pvt->relative_accel) {
 				float drel = data.val / CURVE_SCALE;
-				/* TODO  config settings */
-				drel = apply_curve(drel,0.0003f,0.15f, 14.0f);
+				drel = apply_curve(drel, 0.0001f, 0.15f,
+						pvt->relative_accel * 0.1f);
 				data.val = (int)(drel*SPR16_RELATIVE_SCALE*CURVE_SCALE);
 			}
 			else {
@@ -904,17 +923,6 @@ interrupted:
 }
 
 /*
- * device capability classes
- */
-enum {
-	CAP_KEYBOARD = 1,
-	CAP_MOUSE,
-	CAP_AXIS,
-	CAP_TOUCH,
-	CAP_FEEDBACK
-};
-
-/*
  * may not always get you the right device, use env var to specify exact device
  * export EVDEV_KEYBOARD=event1
  * export EVDEV_MOUSE=event0
@@ -937,19 +945,22 @@ static void select_prp(struct prospective_path *p, char *path, unsigned int key,
 	printf("key(%d) rel(%d) abs(%d) ff(%d)\n", key, rel, abs, ff);
 }
 
-static struct prospective_path *check_environ(int cap_class)
+static struct prospective_path *check_environ(int dev_class)
 {
 	char *e = NULL;
+	const unsigned int maxlen = 9; /* event0000 */
+	unsigned int i;
+
 	memset(&g_prospect, 0, sizeof(g_prospect));
-	switch (cap_class)
+	switch (dev_class)
 	{
-	case CAP_KEYBOARD:
+	case SPR16_DEV_KEYBOARD:
 		e = getenv("EVDEV_KEYBOARD");
 		break;
-	case CAP_MOUSE:
+	case SPR16_DEV_MOUSE:
 		e = getenv("EVDEV_MOUSE");
 		break;
-	case CAP_TOUCH:
+	case SPR16_DEV_TOUCH:
 		e = getenv("EVDEV_TOUCH");
 		break;
 	default:
@@ -957,11 +968,31 @@ static struct prospective_path *check_environ(int cap_class)
 	}
 	if (e == NULL)
 		return NULL;
+
 	/* TODO let user say they don't want to auto detect specific classes */
 	if (strncmp(e, "event", 5) != 0) {
 		printf("EVDEV env var should be the device name, e.g: event1\n");
 		return NULL;
 	}
+
+	/* expects 0-9 digits */
+	for (i = 0; i < maxlen; ++i)
+	{
+		if (e[i] == '\0') {
+			if (i == 5) {
+				printf("missing evdev device number\n");
+				return NULL;
+			}
+			break;
+		}
+		if (i >= 5 && (e[i] < '0' || e[i] > '9')) {
+			printf("erroneous evdev device number\n");
+			return NULL;
+		}
+	}
+	if (i >= maxlen)
+		return NULL;
+
 	snprintf(g_prospect.path, sizeof(g_prospect.path), "%s/%s", devdir, e);
 	return &g_prospect;
 }
@@ -1030,7 +1061,7 @@ static int probably_surface(unsigned long *absbits, unsigned long *keybits) {
 		return 1;
 	}
 }
-static struct prospective_path *find_most_capable(int cap_class)
+static struct prospective_path *find_most_capable(int dev_class)
 {
 	unsigned long evbits[NLONGS(EV_CNT)];
 	unsigned long keybits[NLONGS(KEY_CNT)];
@@ -1088,9 +1119,9 @@ static struct prospective_path *find_most_capable(int cap_class)
 		rel = bit_count(relbits, NLONGS(REL_CNT));
 		led = bit_count(ledbits, NLONGS(LED_CNT));
 		ff  = bit_count(ffbits,  NLONGS(FF_CNT));
-		switch (cap_class)
+		switch (dev_class)
 		{
-		case CAP_KEYBOARD:
+		case SPR16_DEV_KEYBOARD:
 
 			if (!possibly_keyboard(keybits)) {
 				break;
@@ -1113,15 +1144,13 @@ static struct prospective_path *find_most_capable(int cap_class)
 				}
 			}
 			break;
-		case CAP_MOUSE:
+		case SPR16_DEV_MOUSE:
 			if (g_prospect.key == 0 && rel >= 2)
 				select_prp(&g_prospect, path, key, rel, abs, ff);
 			else if (rel >= 2 && rel > g_prospect.rel)
 				select_prp(&g_prospect, path, key, rel, abs, ff);
 			break;
-		case CAP_AXIS:
-			break;
-		case CAP_TOUCH:
+		case SPR16_DEV_TOUCH:
 			/* uses the first one found */
 			if (g_prospect.surface)
 				break;
@@ -1129,8 +1158,6 @@ static struct prospective_path *find_most_capable(int cap_class)
 				select_prp(&g_prospect, path, key, rel, abs, ff);
 				g_prospect.surface = 1;
 			}
-			break;
-		case CAP_FEEDBACK:
 			break;
 		default:
 			errno = EINVAL;
@@ -1163,11 +1190,21 @@ static int add_device(struct input_device *dev, struct input_device **device_lis
 	return 0;
 }
 
+
+/* TODO  config file as well as environ (environ overrides) */
+void evdev_load_settings(struct drv_evdev_pvt *pvt, unsigned int dev_class)
+{
+	if (dev_class == SPR16_DEV_MOUSE || dev_class == SPR16_DEV_TOUCH) {
+		pvt->relative_accel = g_server.pointer_accel;
+		pvt->vscroll_amount = g_server.vscroll_amount;
+	}
+}
+
 /*
  * TODO, check for duplicates, EVIOCGRAB or use owner/group
  */
 int evdev_instantiate(struct input_device **device_list,
-				int epoll_fd, char *devpath)
+				int epoll_fd, char *devpath, unsigned int dev_class)
 {
 	struct epoll_event ev;
 	struct input_device *dev = NULL;
@@ -1341,13 +1378,8 @@ int evdev_instantiate(struct input_device **device_list,
 	}
 #endif
 
-	if (getenv("EVDEV_NOACCEL")) {
-		pvt->relative_accel = 0;
-		printf("relative acceleration disabled\n");
-	}
-	else {
-		pvt->relative_accel = 1;
-	}
+	/* load user specified settings */
+	evdev_load_settings(pvt, dev_class);
 
 	clock_gettime(CLOCK_MONOTONIC_RAW, &pvt->curtime);
 	pvt->last_tap_up = pvt->curtime;
@@ -1432,12 +1464,13 @@ void load_linux_input_drivers(struct input_device **device_list,
 	if (evdev) {
 		struct prospective_path *prp;
 
-		prp = check_environ(CAP_KEYBOARD);
+		prp = check_environ(SPR16_DEV_KEYBOARD);
 		if (prp == NULL) {
-			prp = find_most_capable(CAP_KEYBOARD);
+			prp = find_most_capable(SPR16_DEV_KEYBOARD);
 		}
 		if (prp) {
-			if (evdev_instantiate(device_list, epoll_fd, prp->path)) {
+			if (evdev_instantiate(device_list, epoll_fd,
+						prp->path, SPR16_DEV_KEYBOARD)) {
 				printf("evdev instantiate kbd failed %s\n", prp->path);
 			}
 			else {
@@ -1446,12 +1479,13 @@ void load_linux_input_drivers(struct input_device **device_list,
 			}
 		}
 
-		prp = check_environ(CAP_MOUSE);
+		prp = check_environ(SPR16_DEV_MOUSE);
 		if (prp == NULL) {
-			prp = find_most_capable(CAP_MOUSE);
+			prp = find_most_capable(SPR16_DEV_MOUSE);
 		}
 		if (prp) {
-			if (evdev_instantiate(device_list, epoll_fd, prp->path)) {
+			if (evdev_instantiate(device_list, epoll_fd,
+						prp->path, SPR16_DEV_MOUSE)) {
 				printf("evdev instantiate mouse failed %s\n", prp->path);
 			}
 			else {
@@ -1459,16 +1493,17 @@ void load_linux_input_drivers(struct input_device **device_list,
 			}
 		}
 
-		prp = check_environ(CAP_TOUCH);
+		prp = check_environ(SPR16_DEV_TOUCH);
 		if (prp == NULL) {
-			prp = find_most_capable(CAP_TOUCH);
+			prp = find_most_capable(SPR16_DEV_TOUCH);
 		}
 		if (prp) {
-			if (evdev_instantiate(device_list, epoll_fd, prp->path)) {
+			if (evdev_instantiate(device_list, epoll_fd,
+						prp->path, SPR16_DEV_TOUCH)) {
 				printf("evdev instantiate touch failed %s\n", prp->path);
 			}
 			else {
-				if (getenv("EVDEV_TRACKPAD")) {
+				if (getenv("SPR16_TRACKPAD")) {
 					struct drv_evdev_pvt *drv;
 					drv = (*device_list)->private;
 					drv->is_trackpad = 1;

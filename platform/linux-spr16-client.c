@@ -138,7 +138,6 @@ int spr16_create_memfd(uint16_t width, uint16_t height, uint8_t bpp)
 	unsigned int seals;
 	unsigned int checkseals;
 
-	/* TODO round up for vectorized ops? */
 	shmsize = width * height * (bpp/8);
 	if (!shmsize)
 		return -1;
