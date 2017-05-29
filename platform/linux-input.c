@@ -498,8 +498,7 @@ static float apply_curve(float delta, float min_delta, float max_delta, float sl
 static int abs_to_trackpad(struct drv_evdev_pvt *self,
 			   struct spr16_msgdata_input *msg,
 			   float min_delta,
-			   float max_delta,
-			   float phys_size)
+			   float max_delta)
 {
 	float fval, delta;
 	int code;
@@ -529,7 +528,8 @@ static int abs_to_trackpad(struct drv_evdev_pvt *self,
 	}
 
 	if (self->relative_accel) {
-		delta = apply_curve(delta, min_delta, max_delta, phys_size);
+		delta = apply_curve(delta, min_delta, max_delta,
+				self->relative_accel / SPR16_RELATIVE_SCALE);
 	}
 
 	if (fabs(delta) > min_delta * 12.5) {
@@ -776,7 +776,6 @@ static int transceive_evdev(struct input_device *self, int client)
 	/* TODO gui+config file settings for these */
 	const float min_delta = 0.000075f; /* % of surface */
 	const float max_delta = 1.0f;
-	const float phys_size = 10.0;
 	struct drv_evdev_pvt *pvt = self->private;
 	struct input_event events[EV_BUF];
 	struct spr16_msgdata_input data;
@@ -845,7 +844,8 @@ interrupted:
 			if (pvt->relative_accel) {
 				float drel = data.val / CURVE_SCALE;
 				drel = apply_curve(drel, 0.0001f, 0.15f,
-						pvt->relative_accel * 0.1f);
+						  pvt->relative_accel
+						/ SPR16_RELATIVE_SCALE);
 				data.val = (int)(drel*SPR16_RELATIVE_SCALE*CURVE_SCALE);
 			}
 			else {
@@ -872,8 +872,7 @@ interrupted:
 			if (pvt->is_trackpad
 					&& (data.code == ABS_X || data.code == ABS_Y)) {
 				/* convert to relative */
-				if (abs_to_trackpad(pvt, &data, min_delta,
-							max_delta, phys_size)) {
+				if (abs_to_trackpad(pvt, &data, min_delta, max_delta)) {
 					continue;
 				}
 			}
@@ -1507,6 +1506,9 @@ void load_linux_input_drivers(struct input_device **device_list,
 					struct drv_evdev_pvt *drv;
 					drv = (*device_list)->private;
 					drv->is_trackpad = 1;
+					if (getenv("SPR16_POINTER_ACCEL") == NULL) {
+						drv->relative_accel = 100;
+					}
 					printf("using trackpad device: %s\n", prp->path);
 				}
 				else {
