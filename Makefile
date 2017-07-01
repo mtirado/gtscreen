@@ -1,17 +1,16 @@
 #########################################
 # global defines
 #########################################
+ifndef DESTDIR
+DESTDIR=/usr/local
+endif
+
 # if you have a 64bit system set bitcount(TODO untested).
 DEFINES := -DMAX_SYSTEMPATH=1024 -DPTRBITCOUNT=32
 CFLAGS  := -pedantic -Wall -Wextra -Werror $(DEFINES)
 DEFLANG := -ansi
 #DBG	:= -g -march=core2 -mtune=core2
 # TODO benchmark sync
-
-#########################################
-# optional features
-#########################################
-
 
 #########################################
 # objects
@@ -51,7 +50,6 @@ SPORG_GFX_SRCS := 	./airlock/driver/x11/sporg.c		\
 			./platform/linux-spr16-msgs.c		\
 			./platform/linux-spr16-client.c
 SPORG_GFX_OBJS := $(SPORG_GFX_SRCS:.c=.sporg_gfx.o)
-# TODO wtf is up with that pixman directory name!?
 SPORG_GFX_INC := -I/usr/include/xorg -I/usr/include/pixman-1
 
 #  spr16-x11-xorg input driver
@@ -115,6 +113,7 @@ $(SPR16_EX):		$(SPR16_EX_OBJS)
 			@echo "| spr16_example    OK |"
 			@echo "x---------------------x"
 			@echo ""
+
 $(TOUCHPAINT):		$(TOUCHPAINT_OBJS)
 			$(CC) $(LDFLAGS) -lm $(TOUCHPAINT_OBJS) -o $@
 			@echo ""
@@ -122,7 +121,6 @@ $(TOUCHPAINT):		$(TOUCHPAINT_OBJS)
 			@echo "| touchpaint       OK |"
 			@echo "x---------------------x"
 			@echo ""
-
 
 $(SPORG_GFX):		$(SPORG_GFX_OBJS)
 			$(CC) $(LDFLAGS) -shared $(SPORG_GFX_OBJS) -o $@
@@ -139,6 +137,19 @@ $(SPORG_INPUT):	$(SPORG_INPUT_OBJS)
 			@echo "| sporg_input      OK |"
 			@echo "x---------------------x"
 			@echo ""
+
+install:
+	@umask 022
+	@install -dvm 0755  "$(DESTDIR)/bin"
+	@install -dvm 0755  "$(DESTDIR)/lib/xorg/modules/drivers"
+	@install -dvm 0755  "$(DESTDIR)/lib/xorg/modules/input"
+	@install -Dvm 0755  "$(GTSCREEN)"    "$(DESTDIR)/bin/$(GTSCREEN)"
+	@install -Dvm 0755  "$(TOUCHPAINT)"  "$(DESTDIR)/bin/$(TOUCHPAINT)"
+	@install -Dvm 0755  "$(SPR16_EX)"    "$(DESTDIR)/bin/$(SPR16_EX)"
+	@install -Dvm 0755  "$(SPORG_GFX)"   \
+		"$(DESTDIR)/lib/xorg/modules/drivers/$(SPORG_GFX)"
+	@install -Dvm 0755  "$(SPORG_INPUT)" \
+		"$(DESTDIR)/lib/xorg/modules/input/$(SPORG_INPUT)"
 
 
 
