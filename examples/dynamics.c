@@ -100,7 +100,7 @@ void dynamic_step(struct dynamic *self, float timeslice)
 
 int dynamics_step(struct dynamics *self, unsigned int min_uslice)
 {
-	struct timespec elapsed, tcur;
+	struct timespec tcur;
 	struct object *obj;
 	float timeslice;
 	unsigned int usec;
@@ -108,17 +108,7 @@ int dynamics_step(struct dynamics *self, unsigned int min_uslice)
 	if (clock_gettime(CLOCK_MONOTONIC_RAW, &tcur))
 		return -1;
 
-	/* figure out roughly how many microseconds have gone by */
-	elapsed.tv_sec  = tcur.tv_sec - self->tlast.tv_sec;
-	if (!elapsed.tv_sec) {
-		elapsed.tv_nsec = tcur.tv_nsec - self->tlast.tv_nsec;
-		usec = elapsed.tv_nsec / 1000;
-	}
-	else {
-		usec = ((1000000000 - self->tlast.tv_nsec) + tcur.tv_nsec) / 1000;
-		usec += (elapsed.tv_sec-1) * 1000000;
-	}
-
+	usec = usecs_elapsed(self->tlast, tcur);
 	if (usec == 0 || usec < min_uslice)
 		return 0;
 

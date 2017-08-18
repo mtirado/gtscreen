@@ -28,12 +28,17 @@ int game_input(struct spr16_msgdata_input *input)
 {
 	switch (input->code)
 	{
+	case SPR16_KEYCODE_LEFT:
+	case ',':
 	case 'h':
 		craft_roll(g_moon->player, -10.5f);
 		break;
+	case SPR16_KEYCODE_RIGHT:
+	case '.':
 	case 'l':
 		craft_roll(g_moon->player, 10.5f);
 		break;
+	case SPR16_KEYCODE_UP:
 	case ' ':
 	case 'k':
 		craft_thrust(g_moon->player, 180.0f);

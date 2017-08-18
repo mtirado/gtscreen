@@ -5,7 +5,7 @@ ifndef DESTDIR
 DESTDIR=/usr/local
 endif
 
-# if you have a 64bit system set bitcount(TODO untested).
+# if you use a 64 bit system set bitcount(TODO untested).
 DEFINES := -DMAX_SYSTEMPATH=1024 -DPTRBITCOUNT=32
 CFLAGS  := -pedantic -Wall -Wextra -Werror $(DEFINES)
 DEFLANG := -ansi
@@ -26,15 +26,16 @@ GTSCREEN_SRCS := ./main.c			\
 GTSCREEN_OBJS := $(GTSCREEN_SRCS:.c=.gtscreen.o) \
 		 ./platform/x86.asm.o
 # example program
-SPR16_EX_SRCS := ./examples/spr16-example.c	\
+LANDIT_SRCS := ./examples/spr16-example.c	\
 		 ./examples/game.c		\
 		 ./examples/util.c		\
 		 ./examples/dynamics.c		\
 		 ./examples/moon.c		\
 		 ./examples/craft.c		\
+		 ./examples/particle.c		\
 		 ./platform/linux-spr16-msgs.c	\
 		 ./platform/linux-spr16-client.c
-SPR16_EX_OBJS := $(SPR16_EX_SRCS:.c=.spr16_ex.o)
+LANDIT_OBJS := $(LANDIT_SRCS:.c=.spr16_ex.o)
 
 # touch input example
 TOUCHPAINT_SRCS := ./examples/touchpaint.c	\
@@ -60,9 +61,9 @@ SPORG_INPUT_INC := -I/usr/include/xorg -I/usr/include/pixman-1
 ########################################
 # target files
 ########################################
-GTSCREEN := gtscreen
-SPR16_EX := spr16_example
-TOUCHPAINT := touchpaint
+GTSCREEN    := gtscreen
+LANDIT      := landit
+TOUCHPAINT  := touchpaint
 SPORG_GFX   := sporg_drv.so
 SPORG_INPUT := sporginput_drv.so
 
@@ -86,7 +87,7 @@ SPORG_INPUT := sporginput_drv.so
 	$(CC) -c -std=gnu99 -pedantic -Wall -fPIC $(DBG) $(SPORG_INPUT_INC) -o $@ $<
 all:			\
 	$(GTSCREEN)	\
-	$(SPR16_EX)	\
+	$(LANDIT)	\
 	$(TOUCHPAINT)	\
 	$(SPORG_GFX)	\
 	$(SPORG_INPUT)
@@ -106,11 +107,11 @@ $(GTSCREEN):		$(GTSCREEN_OBJS)
 			@echo "x---------------------x"
 			@echo ""
 
-$(SPR16_EX):		$(SPR16_EX_OBJS)
-			$(CC) $(LDFLAGS) -lm $(SPR16_EX_OBJS) -o $@
+$(LANDIT):		$(LANDIT_OBJS)
+			$(CC) $(LDFLAGS) -lm $(LANDIT_OBJS) -o $@
 			@echo ""
 			@echo "x---------------------x"
-			@echo "| spr16_example    OK |"
+			@echo "| landit           OK |"
 			@echo "x---------------------x"
 			@echo ""
 
@@ -145,7 +146,7 @@ install:
 	@install -dvm 0755  "$(DESTDIR)/lib/xorg/modules/input"
 	@install -Dvm 0755  "$(GTSCREEN)"    "$(DESTDIR)/bin/$(GTSCREEN)"
 	@install -Dvm 0755  "$(TOUCHPAINT)"  "$(DESTDIR)/bin/$(TOUCHPAINT)"
-	@install -Dvm 0755  "$(SPR16_EX)"    "$(DESTDIR)/bin/$(SPR16_EX)"
+	@install -Dvm 0755  "$(LANDIT)"      "$(DESTDIR)/bin/$(LANDIT)"
 	@install -Dvm 0755  "$(SPORG_GFX)"   \
 		"$(DESTDIR)/lib/xorg/modules/drivers/$(SPORG_GFX)"
 	@install -Dvm 0755  "$(SPORG_INPUT)" \
@@ -156,13 +157,13 @@ install:
 
 clean:
 	@$(foreach obj, $(GTSCREEN_OBJS), rm -fv $(obj);)
-	@$(foreach obj, $(SPR16_EX_OBJS), rm -fv $(obj);)
+	@$(foreach obj, $(LANDIT_OBJS), rm -fv $(obj);)
 	@$(foreach obj, $(TOUCHPAINT_OBJS), rm -fv $(obj);)
 	@$(foreach obj, $(SPORG_GFX_OBJS), rm -fv $(obj);)
 	@$(foreach obj, $(SPORG_INPUT_OBJS), rm -fv $(obj);)
 
 	@-rm -fv ./$(GTSCREEN)
-	@-rm -fv ./$(SPR16_EX)
+	@-rm -fv ./$(LANDIT)
 	@-rm -fv ./$(TOUCHPAINT)
 	@-rm -fv ./$(SPORG_GFX)
 	@-rm -fv ./$(SPORG_INPUT)

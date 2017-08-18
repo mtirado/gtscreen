@@ -7,8 +7,19 @@
 #include <math.h>
 #include <stdio.h>
 
+/* one measly pixel */
+void draw_pixel(struct spr16 *screen, uint16_t x, uint16_t y, uint32_t argb)
+{
+	uint32_t *fbmem = (uint32_t *)screen->shmem.addr;
+	uint32_t *row;
+	int fy;
+	fy = screen->height - 1 - y;
+	row = fbmem + (fy * screen->width);
+	*(row+x) = argb;
+}
+
 /* axis aligned rectangle */
-int draw_fillrect(struct spr16 *screen, uint16_t x, uint16_t y,
+void draw_fillrect(struct spr16 *screen, uint16_t x, uint16_t y,
 		  uint16_t w, uint16_t h, uint32_t argb)
 {
 	uint32_t *fbmem = (uint32_t *)screen->shmem.addr;
@@ -23,7 +34,6 @@ int draw_fillrect(struct spr16 *screen, uint16_t x, uint16_t y,
 			*(row+fx+x) = argb;
 		}
 	}
-	return 0;
 }
 void vec2_normalize(struct vec2 *out)
 {
@@ -124,4 +134,18 @@ int draw_bitmap(struct spr16 *screen, char *bmp,
 	return 0;
 }
 
-
+unsigned int usecs_elapsed(struct timespec tlast, struct timespec tcur)
+{
+	struct timespec elapsed;
+	unsigned int usec;
+	elapsed.tv_sec = tcur.tv_sec - tlast.tv_sec;
+	if (!elapsed.tv_sec) {
+		elapsed.tv_nsec = tcur.tv_nsec - tlast.tv_nsec;
+		usec = elapsed.tv_nsec / 1000;
+	}
+	else {
+		usec = ((1000000000 - tlast.tv_nsec) + tcur.tv_nsec) / 1000;
+		usec += (elapsed.tv_sec-1) * 1000000;
+	}
+	return usec;
+}

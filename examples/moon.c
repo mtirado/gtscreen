@@ -8,6 +8,7 @@
 
 struct moon *moon_create(float mass, uint16_t fuel, uint32_t color)
 {
+	struct vec2 pos = { 200.0f, 200.0f };
 	struct moon *newmoon = malloc(sizeof(struct moon));
 	if (!newmoon)
 		return NULL;
@@ -18,7 +19,7 @@ struct moon *moon_create(float mass, uint16_t fuel, uint32_t color)
 	newmoon->o.draw   = (int (*)(void *))moon_draw;
 	newmoon->o.update = (int (*)(void *))moon_update;
 	newmoon->argb     = color;
-	newmoon->player = craft_create(fuel);
+	newmoon->player = craft_create(pos, fuel);
 	if (!newmoon->player)
 		goto err;
 	moon_add_obj(newmoon, &newmoon->player->o);
@@ -26,6 +27,7 @@ struct moon *moon_create(float mass, uint16_t fuel, uint32_t color)
 		goto err;
 	if (dynamics_add_obj(&newmoon->dyn_objs, &newmoon->player->o))
 		goto err;
+
 	/* yeah that's ugly, macros could help */
 	newmoon->player->o.dyn->center.x = 200.0f;
 	newmoon->player->o.dyn->center.y = 200.0f;
@@ -39,6 +41,7 @@ struct moon *moon_create(float mass, uint16_t fuel, uint32_t color)
 	 * pluto	0.610
 	 */
 	newmoon->dyn_objs.newtons.y = -1.625;
+
 	return newmoon;
 
 err:

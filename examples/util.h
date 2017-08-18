@@ -33,9 +33,6 @@ struct vec2
  * */
 typedef float matrix3[9];
 
-
-int draw_fillrect(struct spr16 *screen, uint16_t x, uint16_t y,
-		uint16_t w, uint16_t h, uint32_t argb);
 void vec2_normalize(struct vec2 *out);
 /* input vectors should be normalized */
 float vec2_norml_angle(struct vec2 a, struct vec2 b);
@@ -45,10 +42,8 @@ void vec2_rotate(struct vec2 *out, struct vec2 v, float radians);
 void clear_transform(matrix3 out);
 void set_transform(matrix3 out, float x, float y, float radians);
 
-int draw_bitmap(struct spr16 *screen, char *bmp,
-		uint16_t w, uint16_t h, uint32_t argb, matrix3 transform);
 
-
+unsigned int usecs_elapsed(struct timespec tlast, struct timespec tcur);
 
 struct dynamics
 {
@@ -79,5 +74,10 @@ void dynamic_apply_impulse(struct dynamic *self, struct vec2 force);
 void dynamic_apply_torque(struct dynamic *self,
 			  struct vec2 offset, struct vec2 force);
 
+void draw_pixel(struct spr16 *screen, uint16_t x, uint16_t y, uint32_t argb);
+void draw_fillrect(struct spr16 *screen, uint16_t x, uint16_t y,
+		uint16_t w, uint16_t h, uint32_t argb);
+int draw_bitmap(struct spr16 *screen, char *bmp,
+		uint16_t w, uint16_t h, uint32_t argb, matrix3 transform);
 
 #endif
