@@ -75,9 +75,12 @@ ValuatorMask *g_cursor;
 /* converts to screen space (not sprite space) */
 uint32_t g_rootwidth;
 uint32_t g_rootheight;
+int32_t g_scroll_sensitivity;
 
 int g_rel_cursor_x;
 int g_rel_cursor_y;
+
+int g_scrolling;
 
 /******************************************************************************
  * Function/Macro keys variables
@@ -258,9 +261,13 @@ static void sporg_ascii_mode(InputInfoPtr info, struct spr16_msgdata_input *msg)
 
 static unsigned int axis_relative_accumulate(InputInfoPtr info, struct spr16_msgdata_input *msg)
 {
+	float scrollval;
+	static float scroll_accumulate = 0;
 	switch (msg->code)
 	{
 	case REL_X:
+		if (g_scrolling)
+			return 0;
 		g_rel_cursor_x += msg->val;
 		if (g_rel_cursor_x / (float)SPR16_RELATIVE_SCALE >= g_rootwidth)
 			g_rel_cursor_x = (g_rootwidth-1) * (float)SPR16_RELATIVE_SCALE;
@@ -270,6 +277,20 @@ static unsigned int axis_relative_accumulate(InputInfoPtr info, struct spr16_msg
 				g_rel_cursor_x / (float)SPR16_RELATIVE_SCALE);
 		return POST_ABS;
 	case REL_Y:
+		if (g_scrolling) {
+			scroll_accumulate += -msg->val;
+			if (scroll_accumulate >= g_scroll_sensitivity) {
+				msg->val = fmax(10.0f, scroll_accumulate/10.0f);
+				scroll_accumulate = 0.0f;
+				goto scroll_wheel;
+			}
+			else if (scroll_accumulate <= -g_scroll_sensitivity) {
+				msg->val = fmin(-10.0f, scroll_accumulate/10.0f);
+				scroll_accumulate = 0.0f;
+				goto scroll_wheel;
+			}
+			return 0;
+		}
 		g_rel_cursor_y += msg->val;
 		if (g_rel_cursor_y / (float)SPR16_RELATIVE_SCALE >= g_rootheight)
 			g_rel_cursor_y = (g_rootheight-1) * (float)SPR16_RELATIVE_SCALE;
@@ -280,10 +301,10 @@ static unsigned int axis_relative_accumulate(InputInfoPtr info, struct spr16_msg
 		return POST_ABS;
 
 	case REL_WHEEL:
+scroll_wheel:
+		scrollval = -msg->val / (float)SPR16_RELATIVE_SCALE;
 		/* post as normal relative event */
-		fprintf(stderr, "rel wheelval: %f\n", -msg->val / (float)SPR16_RELATIVE_SCALE);
-		valuator_mask_set(g_cursor, CURSOR_Z,
-				-msg->val / (float)SPR16_RELATIVE_SCALE);
+		valuator_mask_set(g_cursor, CURSOR_Z, scrollval);
 		xf86PostMotionEventM(info->dev, Relative, g_cursor);
 		valuator_mask_zero(g_cursor);
 		return 0;
@@ -341,6 +362,13 @@ static void key_event(InputInfoPtr info, struct spr16_msgdata_input *msg)
 			 *  BTN_3 ... BTN_MOUSE - 1 = 8 + code - BTN_3
 			 *
 			 */
+		case SPR16_KEYCODE_SBTN:
+			/* scroll button */
+			if (msg->val == 1)
+				g_scrolling = 1;
+			else if (msg->val == 0)
+				g_scrolling = 0;
+			return;
 		default:
 			k_c = 2; /* xorg middle is 2 */
 			break;
@@ -523,12 +551,19 @@ static int xf86VoidInit(InputDriverPtr drv, InputInfoPtr pInfo,	int flags)
 	char *err;
 	char *width;
 	char *height;
+	char *scroll_sensitivity;
 
 	fdnum = getenv("SPORG_INPUT_READ");
 	if (fdnum == NULL) {
 		fprintf(stderr, "couldn't locate input descriptor\n");
 		return -1;
 	}
+	scroll_sensitivity = getenv("SPORG_SCROLL_SENSITIVITY");
+	if (scroll_sensitivity == NULL) {
+		scroll_sensitivity = "110";
+	}
+
+
 
 	/* this is hacky for absolute touch dimensions, means we can't resize */
 	width  = getenv("SPORG_WIDTH");
@@ -562,6 +597,16 @@ static int xf86VoidInit(InputDriverPtr drv, InputInfoPtr pInfo,	int flags)
 		fprintf(stderr, "bad width env var\n");
 		return -1;
 	}
+
+	errno = 0;
+	err = NULL;
+	g_scroll_sensitivity = strtol(scroll_sensitivity, &err, 10);
+	if (err == NULL || *err || errno
+			|| g_scroll_sensitivity < 1 || g_scroll_sensitivity > 199) {
+		fprintf(stderr, "scroll sensitivity range is 1-199\n");
+		return -1;
+	}
+	g_scroll_sensitivity = 200 - g_scroll_sensitivity;
 
 	fprintf(stderr, "--------------------------------------------------\n");
 	fprintf(stderr, "- sporg input init -------------------------------\n");

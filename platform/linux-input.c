@@ -63,6 +63,7 @@ struct drv_evdev_pvt {
 	int touch_lbtn;
 	int touch_rbtn;
 	int touch_mbtn;
+	int touch_sbtn;
 
 	/* trackpad emulation, convert abs_xy to relative with tap to click */
 	int is_trackpad;
@@ -187,6 +188,14 @@ static int usecs_elapsed(struct timespec curtime, struct timespec timestamp)
 	return usec;
 }
 
+static void trackpad_tap_up(struct drv_evdev_pvt *pvt)
+{
+	pvt->last_tap_up = pvt->curtime;
+	pvt->tap_reacquire = 4;
+	pvt->tap_up_x = pvt->track_x;
+	pvt->tap_up_y = pvt->track_y;
+}
+
 static int evdev_translate_btns(struct input_device *self, struct spr16_msgdata_input *msg)
 {
 	struct drv_evdev_pvt *pvt = self->private;
@@ -200,6 +209,13 @@ static int evdev_translate_btns(struct input_device *self, struct spr16_msgdata_
 	}
 	else if (pvt->touch_mbtn == msg->code) {
 		msg->code = SPR16_KEYCODE_ABTN;
+		return 0;
+	}
+	else if (pvt->touch_sbtn == msg->code) {
+		if (pvt->is_trackpad) {
+			trackpad_tap_up(pvt);
+		}
+		msg->code = SPR16_KEYCODE_SBTN;
 		return 0;
 	}
 
@@ -224,10 +240,7 @@ static int evdev_translate_btns(struct input_device *self, struct spr16_msgdata_
 
 		if (msg->val == 0) {
 			/* contact up */
-			pvt->last_tap_up = pvt->curtime;
-			pvt->tap_reacquire = 4;
-			pvt->tap_up_x = pvt->track_x;
-			pvt->tap_up_y = pvt->track_y;
+			trackpad_tap_up(pvt);
 			msg->code = SPR16_KEYCODE_CONTACT;
 			break;
 		}
@@ -1296,10 +1309,10 @@ int evdev_instantiate(struct input_device **device_list,
 			pvt->touch_lbtn = BTN_LEFT;
 		else if (bit_check(pvt->keybits, BTN_TOOL_MOUSE, KEY_CNT))
 			pvt->touch_lbtn = BTN_TOOL_MOUSE;
-		else if (bit_check(pvt->keybits, BTN_TOUCH, KEY_CNT))
+		/*else if (bit_check(pvt->keybits, BTN_TOUCH, KEY_CNT))
 			pvt->touch_lbtn = BTN_TOUCH;
 		else if (bit_check(pvt->keybits, BTN_TOOL_FINGER, KEY_CNT))
-			pvt->touch_lbtn = BTN_TOOL_FINGER;
+			pvt->touch_lbtn = BTN_TOOL_FINGER; */
 		else
 			pvt->touch_lbtn = -1;
 		/* touch_rbtn */
@@ -1309,8 +1322,8 @@ int evdev_instantiate(struct input_device **device_list,
 			pvt->touch_rbtn = BTN_STYLUS2;
 		else if (bit_check(pvt->keybits, BTN_TOOL_AIRBRUSH, KEY_CNT))
 			pvt->touch_rbtn = BTN_TOOL_AIRBRUSH;
-		else if (bit_check(pvt->keybits, BTN_TOOL_DOUBLETAP, KEY_CNT))
-			pvt->touch_rbtn = BTN_TOOL_DOUBLETAP;
+		else if (bit_check(pvt->keybits, BTN_TOOL_TRIPLETAP, KEY_CNT))
+			pvt->touch_rbtn = BTN_TOOL_TRIPLETAP;
 		else
 			pvt->touch_rbtn = -1;
 
@@ -1321,12 +1334,16 @@ int evdev_instantiate(struct input_device **device_list,
 			pvt->touch_mbtn = BTN_TOOL_QUADTAP;
 		else if (bit_check(pvt->keybits, BTN_TOOL_QUINTTAP, KEY_CNT))
 			pvt->touch_mbtn = BTN_TOOL_QUINTTAP;
-		else if (bit_check(pvt->keybits, BTN_TOOL_TRIPLETAP, KEY_CNT))
-			pvt->touch_mbtn = BTN_TOOL_TRIPLETAP;
 		else if (bit_check(pvt->keybits, BTN_TOOL_RUBBER, KEY_CNT))
 			pvt->touch_mbtn = BTN_TOOL_RUBBER;
 		else
 			pvt->touch_mbtn = -1;
+
+		/* scroll btn */
+		if (bit_check(pvt->keybits, BTN_TOOL_DOUBLETAP, KEY_CNT))
+			pvt->touch_sbtn = BTN_TOOL_DOUBLETAP;
+		else
+			pvt->touch_sbtn = -1;
 
 		/* 2d input surface */
 		if (bit_check(pvt->absbits, ABS_MT_SLOT, ABS_CNT)

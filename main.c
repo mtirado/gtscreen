@@ -105,12 +105,12 @@ int read_environ()
 	uint16_t req_height    = 0;
 	uint16_t req_refresh   = 60;
 
-	estr = getenv("SPR16_POINTER_VSCROLL");
+	estr = getenv("SPR16_VSCROLL_AMOUNT");
 	if (estr != NULL) {
 		errno = 0;
 		vscroll_amount = strtol(estr, &err, 10);
 		if (err == NULL || *err || errno) {
-			printf("erroneous environ SPR16_POINTER_VSCROLL\n");
+			printf("erroneous environ SPR16_VSCROLL_AMOUNT\n");
 				return -1;
 		}
 		if (vscroll_amount < -50)
@@ -280,7 +280,7 @@ static void print_usage()
 	printf("    SPR16_SCREEN_WIDTH        preferred screen width\n");
 	printf("    SPR16_SCREEN_HEIGHT       preferred screen height\n");
 	printf("    SPR16_SCREEN_REFRESH      target refresh rate\n");
-	printf("    SPR16_POINTER_VSCROLL     vertical scroll minimum\n");
+	printf("    SPR16_VSCROLL_AMOUNT      vertical scroll minimum\n");
 	printf("    SPR16_POINTER_ACCEL       pointer acceleration\n");
 	printf("\n");
 }
