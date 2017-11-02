@@ -98,7 +98,6 @@ SPORG_INPUT := sporginput_drv.so
 %.vsync-test.o: %.c
 	$(CC) -c $(DEFLANG) $(CFLAGS) $(DBG) -o $@ $<
 
-#FIXME -O optimization flag screws up xorg/os.h ... :(
 %.sporg_gfx.o: %.c
 	$(CC) -c -std=gnu99 -pedantic -Wall -fPIC $(DBG) $(SPORG_GFX_INC) -o $@ $<
 
@@ -118,7 +117,7 @@ all:			\
 
 # -lm for floating point is only by gtscreen to calculate relative acceleration
 # and to convert absoulute touch devices to relative trackpads.
-# this can be ifdef'd out or done using some integer technique for systsems without fpu
+# this can be ifdef'd out or done using some integer technique for systems without fpu
 # TODO also used by examples/util.c for vector math, which could be in it's own C file
 $(GTSCREEN):		$(GTSCREEN_OBJS)
 			$(CC) $(DEFINES) -lm $(LDFLAGS) $(DBG_LDFLAGS) $(GTSCREEN_OBJS) -o $@

@@ -66,6 +66,7 @@ static int copy_to_fb(struct spr16_framebuffer *fb,
 {
 
 	/* TODO < 8bpp support */
+	const uint32_t grid_size = PIXL_ALIGN * (fb->bpp/8);
 	const uint32_t weight = fb->bpp/8;
 	uint32_t count;
 	uint16_t x = dmg.xmin;
@@ -78,15 +79,10 @@ static int copy_to_fb(struct spr16_framebuffer *fb,
 	width *= weight;
 	x *= weight;
 
-	/* overly large grid sizes do more harm than good on low-end hardware
-	 * one strategy may be to to keep 1:1 with optimal copy size or so
-	 * 32px xmm, 64px ymm, 128px zmm, @ 32bpp
-	 */
-#define BLKSZ 128  /* 128 byte == 1024 bit == 32px line @32bpp */
-	count = width / BLKSZ;
+	count = width / grid_size;
 
-	if (width % BLKSZ) {
-		printf("drm copy align: %d\n", width % BLKSZ);
+	if (width % grid_size) {
+		printf("drm copy align: %d\n", width % grid_size);
 		return -1;
 	}
 
@@ -99,21 +95,22 @@ static int copy_to_fb(struct spr16_framebuffer *fb,
 		const uint32_t svoff = (((y + i) * fb->width) * weight) + x;
 		const uint32_t cloff = (((y + i) * cl->sprite.width) * weight) + x;
 		uint16_t z;
+#if PIXL_ALIGN == 32
 		(void)z;
-		/*for (z = 0; z < count; ++z) {
-			memcpy((fb->addr + svoff) + (z * BLKSZ),
-				(cl->sprite.shmem.addr + cloff)	+ (z * BLKSZ),
-				BLKSZ);
-		}*/
+		x86_sse2_xmmcpy_1024(fb->addr + svoff,
+				    cl->sprite.shmem.addr + cloff,
+				    count);
+#else
+		for (z = 0; z < count; ++z) {
+			memcpy((fb->addr + svoff) + (z * grid_size),
+				(cl->sprite.shmem.addr + cloff)	+ (z * grid_size),
+				grid_size);
+		}
+#endif
 		/*printf("sync(%d, %d, %d, %d) y=%d\n", x, y, width, height, i);*/
 		/*x86_slocpy_512(fb->addr + svoff,
 				    cl->sprite.shmem.addr + cloff,
 				    count);*/
-		/* TODO --- detect cpu features at runtime, the default should be
-		 * just the regular memcpy */
-		x86_sse2_xmmcpy_1024(fb->addr + svoff,
-				    cl->sprite.shmem.addr + cloff,
-				    count);
 	}
 	/*usleep(30000);
 	bench_end(bench_timer);*/

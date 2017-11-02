@@ -706,18 +706,10 @@ static int spr16_server_sync(struct server_context *self,
 		return -1;
 	}
 
-	/* align sync rectangle to grid
-	 * 16/32 pixel blocks are always nicely aligned for 8, 16, 32 bpp
-	 * 32 pixel grid @ 32bpp = 128byte == full xmm line,
-	 *
-	 * but is no good @24bpp
-	 * fix whenever we get there, for now 24bpp will be left unsupported
-	 *
-	 */
-	xmin = (region->xmin - (region->xmin % 16));
+	xmin = (region->xmin - (region->xmin % PIXL_ALIGN));
 	xmax = region->xmax;
-	if (xmax % 16) /* is there a way to do this without branching so much? */
-		xmax  = (region->xmax + (16 - (region->xmax % 16)));
+	if (xmax % PIXL_ALIGN) /* is there a way to do this without branching so much? */
+		xmax  = (region->xmax + (PIXL_ALIGN - (region->xmax % PIXL_ALIGN)));
 	if (xmax > self->fb->width) {
 		printf("bad sync, xmax == %d\n", xmax);
 		return -1;

@@ -22,6 +22,20 @@
 #include "../../spr16.h"
 #include "platform.h"
 
+/* aligns sync rectangle to grid
+ * 16/32 pixel blocks are always nicely aligned for 8, 16, 32 bpp
+ * 32 pixel grid @ 32bpp = 128byte == full xmm line,
+ * 64 for ymm, 128 for zmm...
+ * but is no good @24bpp, which is currently left unsupported
+ *
+ * large grid alignment does more harm than good on older cpu's
+ * that do not support the newer instructions, repl movsb instruction
+ * should probably be used for anything that supports it? i don't have
+ * any such space-age hardware to test these theories.
+ */
+#define PIXL_ALIGN 32 /* right now this is kind of hacked up, 32 will use
+			 xmm sse2 instructions, for generic memcpy set this to 16 */
+
 int fb_drm_fd_callback(int fd, int event_flags, void *user_data);
 int fb_sync_client(struct server_context *self, struct client *cl);
 
