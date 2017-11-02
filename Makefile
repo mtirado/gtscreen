@@ -4,7 +4,12 @@
 ifndef DESTDIR
 DESTDIR=/usr/local
 endif
-CFGDIR:="$(DESTDIR)/etc/gtscreen"
+ifndef CFGDIR
+CFGDIR:="etc/gtscreen"
+endif
+ifndef BINDIR
+BINDIR:="bin"
+endif
 
 # if you use a 64 bit system set bitcount(TODO untested).
 # errgh, and fix the memfd syscall it only works on x86
@@ -170,15 +175,15 @@ $(SPORG_INPUT):	$(SPORG_INPUT_OBJS)
 
 install:
 	@umask 022
-	@install -dvm 0755  "$(DESTDIR)/bin"
+	@install -dvm 0755  "$(DESTDIR)/$(CFGDIR)"
+	@install -dvm 0755  "$(DESTDIR)/$(BINDIR)"
 	@install -dvm 0755  "$(DESTDIR)/lib/xorg/modules/drivers"
 	@install -dvm 0755  "$(DESTDIR)/lib/xorg/modules/input"
-	@install -dvm 0755  "$(CFGDIR)"
-	@install -Dvm 0755  "$(GTSCREEN)"    "$(DESTDIR)/bin/$(GTSCREEN)"
-	@install -Dvm 0755  "$(TOUCHPAINT)"  "$(DESTDIR)/bin/$(TOUCHPAINT)"
-	@install -Dvm 0755  "$(VSYNC_TEST)"  "$(DESTDIR)/bin/$(VSYNC_TEST)"
-	@install -Dvm 0755  "$(LANDIT)"      "$(DESTDIR)/bin/$(LANDIT)"
-	@install -Dvm 0755  airlock/sporg/xorg.conf "$(CFGDIR)"
+	@install -Dvm 0755  "$(GTSCREEN)"    "$(DESTDIR)/$(BINDIR)/$(GTSCREEN)"
+	@install -Dvm 0755  "$(TOUCHPAINT)"  "$(DESTDIR)/$(BINDIR)/$(TOUCHPAINT)"
+	@install -Dvm 0755  "$(VSYNC_TEST)"  "$(DESTDIR)/$(BINDIR)/$(VSYNC_TEST)"
+	@install -Dvm 0755  "$(LANDIT)"      "$(DESTDIR)/$(BINDIR)/$(LANDIT)"
+	@install -Dvm 0755  airlock/sporg/xorg.conf "$(DESTDIR)/$(CFGDIR)"
 	@install -Dvm 0755  "$(SPORG_GFX)"   \
 		"$(DESTDIR)/lib/xorg/modules/drivers/$(SPORG_GFX)"
 	@install -Dvm 0755  "$(SPORG_INPUT)" \
