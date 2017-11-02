@@ -461,14 +461,12 @@ static struct drm_buffer *alloc_sfb(int card_fd,
 	}
 	/* get mmap offset */
 	moff.handle = cdumb.handle;
-	printf("-------- MOFF.handle = %d\n", moff.handle);
 	if (ioctl(card_fd, DRM_IOCTL_MODE_MAP_DUMB, &moff) == -1) {
 		printf("ioctl(DRM_IOCTL_MODE_MAP_DUMB): %s\n", STRERR);
 		ioctl(card_fd, DRM_IOCTL_MODE_RMFB, &cmd.fb_id);
 		ioctl(card_fd, DRM_IOCTL_MODE_DESTROY_DUMB, &cdumb.handle);
 		return NULL;
 	}
-	printf("-------- MOFF.offset = %d\n", (uint32_t)moff.offset);
 	/* map it! */
 	fbmap = mmap(0, (size_t)cdumb.size, PROT_READ|PROT_WRITE,
 			MAP_SHARED, card_fd, (off_t)moff.offset);
