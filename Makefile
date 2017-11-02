@@ -4,6 +4,7 @@
 ifndef DESTDIR
 DESTDIR=/usr/local
 endif
+CFGDIR:="$(DESTDIR)/etc/gtscreen"
 
 # if you use a 64 bit system set bitcount(TODO untested).
 # errgh, and fix the memfd syscall it only works on x86
@@ -172,17 +173,16 @@ install:
 	@install -dvm 0755  "$(DESTDIR)/bin"
 	@install -dvm 0755  "$(DESTDIR)/lib/xorg/modules/drivers"
 	@install -dvm 0755  "$(DESTDIR)/lib/xorg/modules/input"
+	@install -dvm 0755  "$(CFGDIR)"
 	@install -Dvm 0755  "$(GTSCREEN)"    "$(DESTDIR)/bin/$(GTSCREEN)"
 	@install -Dvm 0755  "$(TOUCHPAINT)"  "$(DESTDIR)/bin/$(TOUCHPAINT)"
 	@install -Dvm 0755  "$(VSYNC_TEST)"  "$(DESTDIR)/bin/$(VSYNC_TEST)"
 	@install -Dvm 0755  "$(LANDIT)"      "$(DESTDIR)/bin/$(LANDIT)"
+	@install -Dvm 0755  airlock/sporg/xorg.conf "$(CFGDIR)"
 	@install -Dvm 0755  "$(SPORG_GFX)"   \
 		"$(DESTDIR)/lib/xorg/modules/drivers/$(SPORG_GFX)"
 	@install -Dvm 0755  "$(SPORG_INPUT)" \
 		"$(DESTDIR)/lib/xorg/modules/input/$(SPORG_INPUT)"
-	#TODO install sporg.conf xorg config
-
-
 
 clean:
 	@$(foreach obj, $(GTSCREEN_OBJS), rm -fv $(obj);)
