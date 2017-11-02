@@ -1,4 +1,17 @@
-/* (c) 2016 Michael R. Tirado -- GPLv3, GNU General Public License version 3.
+/* Copyright (C) 2017 Michael R. Tirado <mtirado418@gmail.com> -- GPLv3+
+ *
+ * This program is libre software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details. You should have
+ * received a copy of the GNU General Public License version 3
+ * along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ *
  *
  * spr16 client forked from xorg process
  *
@@ -11,7 +24,7 @@
 #include <signal.h>
 #include <sched.h>
 #include <sys/prctl.h>
-#include "../../../protocol/spr16.h"
+#include "../../spr16.h"
 
 #include <X11/keysym.h>
 #include "xf86Xinput.h"
@@ -20,7 +33,7 @@
 
 #define STRERR strerror(errno)
 
-struct spr16_msgdata_servinfo g_servinfo;
+struct spr16_msgdata_servinfo g_spr16_servinfo;
 DeviceIntPtr g_inputdev;
 int g_input_write;
 
@@ -33,7 +46,7 @@ void sporg_init()
 		/* TODO check env var if user wants to do this anyway */
 		_exit(-1);
 	}
-	memset(&g_servinfo, 0, sizeof(g_servinfo));
+	memset(&g_spr16_servinfo, 0, sizeof(g_spr16_servinfo));
 	g_inputdev = NULL;
 }
 
@@ -43,7 +56,7 @@ int handle_servinfo(struct spr16_msgdata_servinfo *sinfo)
 	fprintf(stderr, "width: %d\n", sinfo->width);
 	fprintf(stderr, "height: %d\n", sinfo->height);
 	fprintf(stderr, "bpp: %d\n",   sinfo->bpp);
-	memcpy(&g_servinfo, sinfo, sizeof(g_servinfo));
+	memcpy(&g_spr16_servinfo, sinfo, sizeof(g_spr16_servinfo));
 	return 0;
 }
 
@@ -67,17 +80,18 @@ struct spr16_msgdata_servinfo get_servinfo(char *srv_socket)
 		fprintf(stderr, "spr16_client_update()\n");
 		goto err;
 	}
-	if (g_servinfo.width == 0) {
+	if (g_spr16_servinfo.width == 0) {
 		fprintf(stderr, "servinfo timed out.\n");
 		goto err;
 	}
 
 	spr16_client_shutdown();
-	return g_servinfo;
+	fprintf(stderr, "returning servinfo w=%d h=%d\n", g_spr16_servinfo.width, g_spr16_servinfo.height);
+	return g_spr16_servinfo;
 err:
 	spr16_client_shutdown();
-	memset(&g_servinfo, 0, sizeof(g_servinfo));
-	return g_servinfo;
+	memset(&g_spr16_servinfo, 0, sizeof(g_spr16_servinfo));
+	return g_spr16_servinfo;
 }
 
 uint16_t g_width, g_height;
@@ -85,15 +99,15 @@ int handle_servinfo_connect(struct spr16_msgdata_servinfo *sinfo)
 {
 	char name[SPR16_MAXNAME];
 	snprintf(name, sizeof(name), "sporg-%d", getpid());
-	if (g_servinfo.bpp != sinfo->bpp) {
+	if (g_spr16_servinfo.bpp != sinfo->bpp) {
 		fprintf(stderr, "bpp mismatch \n");
 		return -1;
 	}
-	if (g_width > g_servinfo.width || g_height > g_servinfo.height) {
+	if (g_width > g_spr16_servinfo.width || g_height > g_spr16_servinfo.height) {
 		fprintf(stderr, "bad width/height %d/%d", g_width, g_height);
 		return -1;
 	}
-	if (spr16_client_handshake_start(name, g_width, g_height, SPRITE_FLAG_INVERT_Y)){
+	if (spr16_client_handshake_start(name, g_width, g_height, 0)){
 		fprintf(stderr, "handshake_start failed\n");
 		return -1;
 	}

@@ -13,25 +13,20 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  *
  *
- * TODO currently only does 1 sprite per screen which is not very sprite-like :(
- * need to add the good stuff like sprite offsets, tiling, splits, resizing (at least
- * growing), all the basic window manager type features.
- *
  */
-#ifndef SCREEN_H__
-#define SCREEN_H__
 
-#include "spr16.h"
+#ifndef LINUX_VT_H__
+#define LINUX_VT_H__
 
-struct screen {
-	struct screen *next;
-	struct client *clients; /* head is focused client */
-};
+#include <linux/kd.h>
+#include <linux/vt.h>
 
-int screen_init(struct screen *self);
-int screen_add_client(struct screen *self, struct client *cl);
-struct client *screen_find_client(struct screen *self, int cl_fd);
-struct client *screen_remove_client(struct screen *self, int cl_fd);
-int screen_free(struct screen *self);
+/* some very coarse grained terminal mouse input can be received
+ * using the right control codes, as \033[mbxy  (button, x, y)
+ * keyboard mode can be K_UNICODE, (evdev, etc)K_OFF,
+ * K_XLATE, K_MEDIUMRAW, or K_RAW
+ * */
+int vt_init(int tty_fd, unsigned int kbd_mode);
+void vt_shutdown();
 
 #endif

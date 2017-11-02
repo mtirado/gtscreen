@@ -1,22 +1,41 @@
-/* (c) 2016 Michael R. Tirado -- GPLv3, GNU General Public License version 3.
+/* Copyright (C) 2017 Michael R. Tirado <mtirado418@gmail.com> -- GPLv3+
+ *
+ * This program is libre software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details. You should have
+ * received a copy of the GNU General Public License version 3
+ * along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ *
  *
  * TODO optimize
  */
+
 #define _GNU_SOURCE
 #include <time.h>
 #include <memory.h>
 #include <malloc.h>
 #include "game.h"
-
+#include <errno.h>
 /* FIXME single gravity vector hack */
 struct vec2 g_gravity;
 
 int dynamics_init(struct dynamics *self)
 {
+	int r;
 	memset(self, 0, sizeof(struct dynamics));
 	if (clock_gettime(CLOCK_MONOTONIC_RAW, &self->tlast))
 		return -1;
-	return dynamics_step(self, 0);
+
+	r = dynamics_step(self, 0);
+	if (r < 0)
+		return -1;
+	return 0;
 }
 
 /* ideally we want dynamic structs packed tightly in memory, when that matters
@@ -110,7 +129,7 @@ int dynamics_step(struct dynamics *self, unsigned int min_uslice)
 
 	usec = usecs_elapsed(self->tlast, tcur);
 	if (usec == 0 || usec < min_uslice)
-		return 0;
+		return 1;
 
 	g_gravity = self->newtons;
 	timeslice = (float)usec / 1000000.0f;

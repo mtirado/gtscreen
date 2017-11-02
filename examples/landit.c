@@ -1,6 +1,19 @@
-/* (c) 2016 Michael R. Tirado -- GPLv3, GNU General Public License version 3.
+/* Copyright (C) 2017 Michael R. Tirado <mtirado418@gmail.com> -- GPLv3+
+ *
+ * This program is libre software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details. You should have
+ * received a copy of the GNU General Public License version 3
+ * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  *
  */
+
 #define _GNU_SOURCE
 #include <errno.h>
 #include <stdio.h>
@@ -8,7 +21,7 @@
 #include <memory.h>
 #include <unistd.h>
 #include <time.h>
-#include "../protocol/spr16.h"
+#include "../spr16.h"
 #include "game.h"
 
 #define STRERR strerror(errno)
@@ -19,7 +32,7 @@ int handle_servinfo(struct spr16_msgdata_servinfo *sinfo)
 	printf("max width: %d\n", sinfo->width);
 	printf("max width: %d\n", sinfo->height);
 	printf("max bpp: %d\n",   sinfo->bpp);
-	if (spr16_client_handshake_start("Landit", 640, 480, SPRITE_FLAG_INVERT_Y))
+	if (spr16_client_handshake_start("Landit", 640, 480, 0))
 		return -1;
 	return 0;
 }
@@ -32,7 +45,7 @@ int main(int argc, char *argv[])
 
 	if (argc < 2) {
 		printf("usage: program <server-name>\n");
-		printf("e.g: spr16_example tty1\n");
+		printf("e.g: landit tty1\n");
 		return -1;
 	}
 
@@ -57,6 +70,7 @@ int main(int argc, char *argv[])
 		printf("handshake timed out\n");
 		return -1;
 	}
+
 	screen = spr16_client_get_sprite();
 	if (!screen)
 		return -1;

@@ -34,7 +34,7 @@
 #include <errno.h>
 #include <damage.h>
 
-#include "../../../protocol/spr16.h"
+#include "../../spr16.h"
 
 /* sporg_client interface */
 struct spr16_msgdata_servinfo get_servinfo(char *srv_socket);

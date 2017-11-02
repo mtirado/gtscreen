@@ -112,7 +112,6 @@ static uint32_t to_x11(uint16_t k_c)
 	if (k_c <= 0x00ff) /* ascii */ {
 		return k_c;
 	}
-
 	switch (k_c)
 	{
 		case SPR16_KEYCODE_CAPSLOCK:	return XK_Caps_Lock;
@@ -183,7 +182,7 @@ static uint32_t to_x11(uint16_t k_c)
  * or if i can just cache them here indefinitely. TODO figure out.
  * if the size never changes we can at least eliminate malloc from this mess.
  */
-static uint32_t spr16_to_x11(DeviceIntPtr dev, struct spr16_msgdata_input *msg)
+static uint32_t spr16_to_x11(DeviceIntPtr dev, uint32_t code)
 {
 	unsigned int i, w;
 	KeySymsPtr symbols;
@@ -196,11 +195,11 @@ static uint32_t spr16_to_x11(DeviceIntPtr dev, struct spr16_msgdata_input *msg)
 		return 0;
 	}
 
-	if (msg->code < ' ') {
-		key = ctrl_to_x11(msg->code);
+	if (code < ' ') {
+		key = ctrl_to_x11(code);
 	}
 	else {
-		key = to_x11(msg->code);
+		key = to_x11(code);
 	}
 
 	/* ascii keycodes map directly */
@@ -239,7 +238,7 @@ static void sporg_ascii_mode(InputInfoPtr info, struct spr16_msgdata_input *msg)
 	int state_shifted;
 
 	state_shifted = ascii_kbd_is_shifted(msg->code);
-	k_c = spr16_to_x11(info->dev, msg);
+	k_c = spr16_to_x11(info->dev, msg->code);
 
 	/* hack for ascii mode to be usable without proper shift down/up */
 	if (state_shifted) {
@@ -247,7 +246,7 @@ static void sporg_ascii_mode(InputInfoPtr info, struct spr16_msgdata_input *msg)
 		uint32_t shift_key;
 		fake_shift.id = msg->id;
 		fake_shift.code = 14;
-		shift_key = spr16_to_x11(info->dev, &fake_shift);
+		shift_key = spr16_to_x11(info->dev, fake_shift.code);
 		xf86PostKeyboardEvent(info->dev, shift_key, 1);
 		xf86PostKeyboardEvent(info->dev, k_c, 1);
 		xf86PostKeyboardEvent(info->dev, k_c, 0);
@@ -346,7 +345,7 @@ static void key_event(InputInfoPtr info, struct spr16_msgdata_input *msg)
 {
 	uint32_t k_c;
 	/* button range is BTN_0 ... BTN_GEAR_UP, currently only deals with mouse */
-	if (msg->code >= SPR16_KEYCODE_LBTN && msg->code <= SPR16_KEYCODE_CONTACT) {
+	if (msg->code >= SPR16_KEYCODE_ABTN && msg->code <= SPR16_KEYCODE_CONTACT) {
 		switch (msg->code)
 		{
 		case SPR16_KEYCODE_CONTACT:
@@ -376,8 +375,7 @@ static void key_event(InputInfoPtr info, struct spr16_msgdata_input *msg)
 		xf86PostButtonEvent(info->dev, Relative, k_c, (msg->val == 1), 0, 0);
 		return;
 	}
-
-	k_c = spr16_to_x11(info->dev, msg);
+	k_c = spr16_to_x11(info->dev, msg->code);
 	if (msg->val == 0 || msg->val == 1) {
 		xf86PostKeyboardEvent(info->dev, k_c, msg->val);
 	}
@@ -385,6 +383,30 @@ static void key_event(InputInfoPtr info, struct spr16_msgdata_input *msg)
 		xf86PostKeyboardEvent(info->dev, k_c, 0);
 		xf86PostKeyboardEvent(info->dev, k_c, 1);
 	}
+}
+
+static void control_input(InputInfoPtr info, struct spr16_msgdata_input *msg)
+{
+	uint32_t k_c;
+	switch (msg->code)
+	{
+	case SPR16_CTRLCODE_RESET:
+
+		/* if this looks hacky(it is), let me know a better way */
+		k_c = spr16_to_x11(info->dev, SPR16_KEYCODE_LALT);
+		set_key_down(info->dev, k_c, KEY_PROCESSED);
+		xf86PostKeyboardEvent(info->dev, k_c, 0);
+
+		k_c = spr16_to_x11(info->dev, SPR16_KEYCODE_LCTRL);
+		set_key_down(info->dev, k_c, KEY_PROCESSED);
+		xf86PostKeyboardEvent(info->dev, k_c, 0);
+
+		break;
+	default:
+		fprintf(stderr, "control_input: unknown control code\n");
+		break;
+	}
+	return;
 }
 
 static void sporgReadInput(InputInfoPtr pInfo)
@@ -419,6 +441,9 @@ intr:
 		case SPR16_INPUT_KEY_ASCII:
 			/* this is a fallback */
 			sporg_ascii_mode(pInfo, &msgs[i]);
+			break;
+		case SPR16_INPUT_CONTROL:
+			control_input(pInfo, &msgs[i]);
 			break;
 		default:
 			break;

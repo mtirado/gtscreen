@@ -1,11 +1,21 @@
-/* (c) 2016 Michael R. Tirado -- GPLv3, GNU General Public License version 3.
+/* Copyright (C) 2017 Michael R. Tirado <mtirado418@gmail.com> -- GPLv3+
  *
- * gtscreen - graphic type screen
+ * This program is libre software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
  *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details. You should have
+ * received a copy of the GNU General Public License version 3
+ * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
 /*
- *  TODO: evdev SYN_DROPPED
+ *  TODO: hmm probably should move this into platform/linux/
+ *  evdev SYN_DROPPED
  *  i'm fine with evqueue assuming EV_MAX*2 size (*2 accounts for syn_dropped)
  *
  */
@@ -21,14 +31,17 @@
 #include <stdlib.h>
 
 #include "defines.h"
-#include "platform/linux-drm.h"
-#include "platform/linux-vt.h"
-#include "protocol/spr16.h"
+#include "spr16.h"
+#include "screen.h"
+#include "platform/fdpoll-handler.h"
+#include "platform/linux/platform.h"
+#include "platform/linux/vt.h"
+#include "platform/linux/fb.h"
 #define STRERR strerror(errno)
 
-struct server g_server;
-struct drm_state g_state;
 sig_atomic_t g_running;
+struct server_options g_srv_opts;
+struct drm_kms *g_card0;
 
 /* reset on fatal signals, sigkill screws us up still :( */
 void sig_func(int signum)
@@ -38,6 +51,7 @@ void sig_func(int signum)
 	case SIGQUIT:
 	case SIGINT:
 	case SIGHUP:
+	case SIGTERM:
 		g_running = 0;
 		return;
 	default:
@@ -66,36 +80,53 @@ static void sig_setup()
 	sa.sa_handler = SIG_IGN; sigaction(SIGPIPE, &sa, NULL);
 }
 
-int exec_loop(int tty)
+int server_main(struct fdpoll_handler *fdpoll, struct drm_kms *card)
 {
-	int listen_socket;
-	listen_socket = spr16_server_init(g_state.sfb->width,
-					  g_state.sfb->height,
-					  g_state.sfb->bpp);
-	if (listen_socket == -1 ){
+	struct server_context *ctx;
+	struct spr16_framebuffer fb;
+	memset(&fb, 0, sizeof(struct spr16_framebuffer));
+	fb.width  = card->sfb->width;
+	fb.height = card->sfb->height;
+	fb.bpp    = card->sfb->bpp;
+	fb.addr   = card->sfb->addr;
+	fb.size   = card->sfb->size;
+
+	/*K_XLATE, or K_MEDIUMRAW for keycodes, RAW is 8 bits*/
+	if (vt_init(0, K_XLATE))
+		return -1;
+	if (atexit(vt_shutdown))
+		return -1;
+	sig_setup();
+
+	ctx = spr16_server_init(fdpoll, &fb);
+	if (ctx == NULL) {
 		printf("server init failed\n");
 		return -1;
 	}
-	(void)tty;
 
-	/* TODO turn off kbd if using evdev? */
-	if (spr16_server_init_input()) {
-		printf("input init failed\n");
-		return -1;
+	/* for vblank handler, and future pageflipping */
+	if (fdpoll_handler_add(fdpoll, card->card_fd, FDPOLLIN, fb_drm_fd_callback, ctx)){
+		printf("fdpoll_handler_add(%d) failed\n", card->card_fd);
+		goto err;
 	}
+
 	while (g_running)
 	{
-		if (spr16_server_update(listen_socket)) {
+		if (spr16_server_update(ctx)) {
 			printf("spr16 update error\n");
-			spr16_server_shutdown(listen_socket);
-			return -1;
+			goto err;
 		}
 	}
-	spr16_server_shutdown(listen_socket);
+
+	spr16_server_shutdown(ctx);
 	return 0;
+
+err:
+	spr16_server_shutdown(ctx);
+	return -1;
 }
 
-int read_environ()
+int read_environ(struct server_options *srv_opts)
 {
 	char *estr = NULL;
 	char *err = NULL;
@@ -104,6 +135,8 @@ int read_environ()
 	uint16_t req_width     = 0;
 	uint16_t req_height    = 0;
 	uint16_t req_refresh   = 60;
+
+	memset(srv_opts, 0, sizeof(struct server_options));
 
 	estr = getenv("SPR16_VSCROLL_AMOUNT");
 	if (estr != NULL) {
@@ -159,114 +192,14 @@ int read_environ()
 				return -1;
 		}
 	}
-	g_server.pointer_accel   = pointer_accel;
-	g_server.vscroll_amount  = vscroll_amount;
-	g_server.request_width   = req_width;
-	g_server.request_height  = req_height;
-	g_server.request_refresh = req_refresh;
+	srv_opts->pointer_accel   = pointer_accel;
+	srv_opts->vscroll_amount  = vscroll_amount;
+	srv_opts->request_width   = req_width;
+	srv_opts->request_height  = req_height;
+	srv_opts->request_refresh = req_refresh;
 	return 0;
 }
 
-/* returns the closest <= match preference on width
- * refresh is matched to closest value */
-static int get_mode_idx(struct drm_mode_modeinfo *modes,
-			uint16_t count,
-			uint16_t width,
-			uint16_t height,
-			uint16_t refresh)
-{
-	int i;
-	int pick = -1;
-	if (width == 0)
-		width = 0xffff;
-	if (height == 0)
-		height = 0xffff;
-	for (i = 0; i < count; ++i)
-	{
-		if (modes[i].hdisplay > width || modes[i].vdisplay > height)
-			continue;
-		/* must divide evenly by 16 */
-		if (modes[i].hdisplay % 16 == 0) {
-			if (pick < 0) {
-				pick = i;
-				continue;
-			}
-			if (modes[i].hdisplay > modes[pick].hdisplay)
-				pick = i;
-			else if (modes[i].vdisplay > modes[pick].vdisplay)
-				pick = i;
-			else if (modes[i].hdisplay == modes[pick].hdisplay
-					&& modes[i].vdisplay == modes[pick].vdisplay) {
-				if (abs(refresh - modes[i].vrefresh)
-					  < abs(refresh - modes[pick].vrefresh)) {
-					pick = i;
-				}
-			}
-		}
-	}
-	if (pick < 0) {
-		printf("could not find any usable modes for (%dx%d@%dhz)\n",
-				width, height, refresh);
-		return -1;
-	}
-	return pick;
-}
-
-static int print_modes()
-{
-	struct drm_mode_card_res *res = NULL;
-	struct drm_mode_get_connector *conn = NULL;
-	struct drm_mode_modeinfo *modes = NULL;
-	uint32_t mode_count;
-	int card_fd;
-	int ret = 0;
-	uint32_t i;
-
-	card_fd = open("/dev/dri/card0", O_RDWR|O_CLOEXEC);
-	if (card_fd == -1) {
-		printf("open /dev/dri/card0: %s\n", STRERR);
-		return -1;
-	}
-
-	res = alloc_mode_card_res(card_fd);
-	if (!res) {
-		printf("unable to create drm structure\n");
-		ret = -1;
-		goto free_ret;
-	}
-
-	printf("--- Card 0 Resources ----------------------\n");
-	print_mode_card_resources(res);
-	for (i = 0; i < res->count_connectors; ++i)
-	{
-		uint32_t conn_id;
-		uint32_t z;
-		mode_count = 0;
-		conn_id = drm_get_id(res->connector_id_ptr, i);
-		conn = alloc_connector(card_fd, conn_id);
-		if (!conn) {
-			printf("unable to create drm structure\n");
-			ret = -1;
-			goto free_ret;
-		}
-		printf("--- Connector %d --------------------------\n", conn_id);
-		print_connector(conn);
-		modes = get_connector_modeinfo(conn, &mode_count);
-		printf("Modes: %d\n", mode_count);
-		for (z = 0; z < mode_count; ++z)
-		{
-			printf("    [%d] %dx%d@%dhz\n", z,
-					modes[z].hdisplay,
-					modes[z].vdisplay,
-					modes[z].vrefresh);
-		}
-	}
-free_ret:
-	free_connector(conn);
-	free_mode_card_res(res);
-	close(card_fd);
-	return ret;
-}
 
 static void print_usage()
 {
@@ -282,6 +215,7 @@ static void print_usage()
 	printf("    SPR16_SCREEN_REFRESH      target refresh rate\n");
 	printf("    SPR16_VSCROLL_AMOUNT      vertical scroll minimum\n");
 	printf("    SPR16_POINTER_ACCEL       pointer acceleration\n");
+	printf("    SPR16_TRACKPAD            surface acts as trackpad\n");
 	printf("\n");
 }
 
@@ -293,7 +227,8 @@ int read_args(int argc, char *argv[])
 	for (i = 1; i < argc; ++i)
 	{
 		if (strncmp("--printmodes", argv[i], 13) == 0) {
-			print_modes();
+			/* FIXME */
+			drm_kms_print_modes("/dev/dri/card0");
 			_exit(0);
 			return -1;
 		}
@@ -307,109 +242,37 @@ int read_args(int argc, char *argv[])
 
 int main(int argc, char *argv[])
 {
-	struct simple_drmbuffer *sfb = NULL;
-	struct drm_mode_card_res *res = NULL;
-	struct drm_mode_get_connector *conn = NULL;
-	struct drm_mode_modeinfo *modes = NULL;
-	uint32_t mode_count;
-	uint32_t conn_id;
-	int card_fd;
-	int ret = 0;
-	uint32_t i;
-	int tty;
-	int idx = -1;
+	struct fdpoll_handler *fdpoll;
+	int ret = -1;
+
 	g_running = 1;
-	memset(&g_state, 0, sizeof(g_state));
-	memset(&g_server, 0, sizeof(g_server));
+	memset(&g_srv_opts, 0, sizeof(struct server_options));
 
 	/* line buffer output */
 	setvbuf(stdout, NULL, _IOLBF, 0);
 	setvbuf(stderr, NULL, _IOLBF, 0);
 
-	if (read_environ())
+	if (read_environ(&g_srv_opts))
 		return -1;
 	if (read_args(argc, argv))
 		return -1;
 
-	card_fd = open("/dev/dri/card0", O_RDWR|O_CLOEXEC);
-	if (card_fd == -1) {
-		printf("open /dev/dri/card0: %s\n", STRERR);
-		return -1;
-	}
-	if (card_set_master(card_fd)) {
+	fdpoll = fdpoll_handler_create(MAX_FDPOLL_HANDLER, 1);
+	if (fdpoll == NULL) {
+		printf("fdpoll_handler_create(%d, 1) failed\n", MAX_FDPOLL_HANDLER);
 		return -1;
 	}
 
-	res = alloc_mode_card_res(card_fd);
-	if (!res) {
-		printf("unable to create drm structure\n");
-		ret = -1;
-		goto free_ret;
+	/* card0 must be set before any SIGUSR1/2's might be sent! */
+	g_card0 = drm_mode_create("card0", g_srv_opts.request_width,
+					   g_srv_opts.request_height,
+					   g_srv_opts.request_refresh);
+	if (g_card0 == NULL) {
+		printf("drm_mode_create failed\n");
+		return -1;
 	}
 
-	i = 0;
-	mode_count = 0;
-	conn_id = drm_get_id(res->connector_id_ptr, i);
-	conn = alloc_connector(card_fd, conn_id);
-	if (!conn) {
-		printf("unable to create drm structure\n");
-		ret = -1;
-		goto free_ret;
-	}
-
-	modes = get_connector_modeinfo(conn, &mode_count);
-	idx = get_mode_idx(modes, mode_count,
-			g_server.request_width,
-			g_server.request_height,
-			g_server.request_refresh);
-	if (idx < 0)
-		goto free_ret;
-
-	printf("using mode[%d] (%dx%d@%dhz)\n",	idx,
-			modes[idx].hdisplay,
-			modes[idx].vdisplay,
-			modes[idx].vrefresh);
-
-	/* buffer pitch must divide evenly by 16,
-	 * check against bpp here when that is variable */
-	sfb = alloc_sfb(card_fd, modes[idx].hdisplay, modes[idx].vdisplay, 24, 32);
-	if (!sfb) {
-		ret = -1;
-		goto free_ret;
-	}
-
-	if (connect_sfb(card_fd, conn, &modes[idx], sfb) == -1) {
-		ret = -1;
-		goto free_ret;
-	}
-
-	g_state.card_fd = card_fd;
-	g_state.conn    = conn;
-	g_state.sfb     = sfb;
-	g_state.conn_modeidx = idx;
-	conn = NULL;
-	/* drmstate must be set before any SIGUSR1/2's might be sent! */
-	drm_set_state(&g_state);
-
-	tty = 0;
-	/*K_XLATE, or K_MEDIUMRAW for keycodes, RAW is 8 bits*/
-	if (vt_init(tty, K_XLATE)) {
-		goto free_ret;
-	}
-	if (atexit(vt_shutdown)) {
-		goto free_ret;
-	}
-	sig_setup();
-	ret = exec_loop(tty);
-	destroy_sfb(card_fd, sfb);
-free_ret:
-	/* TODO general cleanup function that loops through resources on a card */
-	/* free_sfb !!! */
-	free_connector(conn);
-	free_mode_card_res(res);
-	close(card_fd);
+	ret = server_main(fdpoll, g_card0);
+	drm_kms_destroy(g_card0);
 	return ret;
-
 }
-
-

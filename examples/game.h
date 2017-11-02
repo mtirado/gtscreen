@@ -1,13 +1,25 @@
-/* (c) 2016 Michael R. Tirado -- GPLv3, GNU General Public License version 3.
+/* Copyright (C) 2017 Michael R. Tirado <mtirado418@gmail.com> -- GPLv3+
  *
+ * This program is libre software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details. You should have
+ * received a copy of the GNU General Public License version 3
+ * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
+
 #ifndef _GAME_H__
 #define _GAME_H__
 
 #define _GNU_SOURCE
 #include <time.h>
 
-#include "../protocol/spr16.h"
+#include "../spr16.h"
 #include "util.h"
 
 extern struct spr16 *g_screen;
@@ -51,6 +63,7 @@ struct emitter
 	struct vec2 root_velocity;
 	struct vec2 direction;
 	struct vec2 center;
+	uint32_t duration;
 	float force;
 	uint32_t radius;
 	uint32_t max;
@@ -78,6 +91,8 @@ struct craft
 	struct object o;
 	uint16_t fuel;
 	uint32_t argb;
+	int thrusting;
+	int rolling;
 	struct emitter *main_thruster;
 	struct emitter *port_thruster;
 	struct emitter *starboard_thruster;
@@ -116,7 +131,7 @@ void craft_roll(struct craft *self, float torque);
 
 struct emitter *emitter_create(struct vec2 center, struct vec2 direction, int type);
 int emitter_emit(struct emitter *self, uint32_t count);
-int emitter_update(struct emitter *self);
+int emitter_update_draw(struct emitter *self);
 int emitter_free(struct emitter *self);
 
 #endif

@@ -60,7 +60,6 @@
 
 #include "sporg-compat-api.h"
 #include "sporg.h"
-#include "../../../protocol/spr16.h"
 
 #define STRERR strerror(errno)
 
@@ -212,8 +211,6 @@ static Bool Probe(DriverPtr drv, int flags)
 	}
 	sinfo = get_servinfo("tty1"); /* XXX -- don't hardcode tty1 */
 
-	fprintf(stderr, "width(%d) height(%d) bpp(%d)\n",
-			sinfo.width, sinfo.height, sinfo.bpp);
 	g_maxvram  = sinfo.width * sinfo.height * (sinfo.bpp/8) / 1024;
 	if (g_maxvram == 0) {
 		fprintf(stderr, "servinfo invalid\n");
@@ -269,11 +266,17 @@ static void dispatch_dirty(ScreenPtr pScreen)
 	RegionPtr dirty = DamageRegion(sporg->damage);
 	unsigned num_cliprects = REGION_NUM_RECTS(dirty);
 	BoxPtr rect = REGION_RECTS(dirty);
+
+	/* this isn't really vsync'd, more of a rate limit since it's really difficult
+	 * to tell clients not to draw during vblank period. it lets the server merge
+	 * damage and copy during vblank at least, instead of copying immediately.
+	 */
 	for (unsigned i = 0; i < num_cliprects; i++, rect++) {
 		while(spr16_client_sync(rect->x1,
 					rect->y1,
-					rect->x2 - rect->x1,
-					rect->y2 - rect->y1)) {
+					rect->x2,
+					rect->y2,
+					SPRITESYNC_FLAG_VBLANK)) {
 			if (errno != EAGAIN) {
 				fprintf(stderr,"spr16 sync error: %s\n",strerror(errno));
 				_exit(-1);

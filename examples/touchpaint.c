@@ -1,6 +1,19 @@
-/* (c) 2016 Michael R. Tirado -- GPLv3, GNU General Public License version 3.
+/* Copyright (C) 2017 Michael R. Tirado <mtirado418@gmail.com> -- GPLv3+
+ *
+ * This program is libre software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details. You should have
+ * received a copy of the GNU General Public License version 3
+ * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  *
  */
+
 #define _GNU_SOURCE
 #include <errno.h>
 #include <stdio.h>
@@ -10,7 +23,7 @@
 #include <time.h>
 #include <math.h>
 
-#include "../protocol/spr16.h"
+#include "../spr16.h"
 #include "util.h"
 #define STRERR strerror(errno)
 
@@ -92,7 +105,8 @@ int touch_init(struct spr16 *screen)
 	{
 		g_contacts[i].id = -1;
 	}
-	if (spr16_client_sync(0, 0, g_screen->width, g_screen->height )) {
+	if (spr16_client_sync(0, 0, g_screen->width,
+				g_screen->height, SPRITESYNC_FLAG_ASYNC)) {
 		if (errno != EAGAIN) {
 			return -1;
 		}
@@ -193,7 +207,7 @@ int touch_draw()
 			if (y+h >= g_screen->height)
 				y = g_screen->height - h;
 			draw_fillrect(g_screen, x, y, w, h, g_palette[pindex]);
-			if (spr16_client_sync(x, y, w, h)) {
+			if (spr16_client_sync(x, y, x+w, x+h, SPRITESYNC_FLAG_ASYNC)) {
 				if (errno != EAGAIN) {
 					return -1;
 				}

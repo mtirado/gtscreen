@@ -1,5 +1,16 @@
-/* (c) 2017 Michael R. Tirado
- * GPLv3+, GNU General Public License version 3 or later
+/* Copyright (C) 2017 Michael R. Tirado <mtirado418@gmail.com> -- GPLv3+
+ *
+ * This program is libre software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details. You should have
+ * received a copy of the GNU General Public License version 3
+ * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
 #define _GNU_SOURCE
@@ -22,12 +33,14 @@ struct emitter *emitter_create(struct vec2 center, struct vec2 direction, int ty
 	switch (type)
 	{
 	case EMIT_MAIN_ENGINE:
-		self->max = 20000;
+		self->duration  = 4000000;
+		self->max = 30000;
 		self->color = 0xffaa071a;
-		self->force = 75.0f;
+		self->force = 35.0f;
 		self->radius = 10;
 		break;
 	case EMIT_ROTATE:
+		self->duration = 2000000;
 		self->color = 0xff1aaa1a;
 		self->max = 1000;
 		self->force = 45.0f;
@@ -68,34 +81,33 @@ int emitter_emit(struct emitter *self, uint32_t count)
 	uint32_t z;
 
 	vec2_rotate(&right, self->direction, 1.5708);
-
 	if (count + self->num_active > self->max)
 		count = self->max - self->num_active;
 
 	for (z = 0; z < count; ++z)
 	{
 		uint32_t i = ++self->num_active;
-		float force = self->force * ((300+(g_noise%300)) / 100.0f);
+		float force = self->force * (float)((3000+(g_noise%3000)) / 1000.0f);
 		uint32_t t;
-		self->particles[i].usecs_left  = 2000000;
+		self->particles[i].usecs_left  = self->duration;
 		self->particles[i].color       = self->color;
 		self->particles[i].velocity    = self->root_velocity;
 		self->particles[i].velocity.x += self->direction.x * force;
 		self->particles[i].velocity.y += self->direction.y * force;
 		self->particles[i].center      = self->center;
 
-		g_noise += i * self->center.x + z;
-		t = g_noise%self->radius;
+		g_noise += self->center.x + z;
+		t = g_noise % self->radius;
 		self->particles[i].center.x += right.x * ((float)self->radius - ((t*2)));
-
-		g_noise += i * self->center.y + z;
-		t = g_noise%self->radius;
+		g_noise += self->center.y + z;
+		t = g_noise % self->radius;
 		self->particles[i].center.y += right.y * ((float)self->radius - ((t*2)));
 
 		if (self->particles[i].center.x >= g_screen->width
 				|| self->particles[i].center.x <= 0.0f
 				|| self->particles[i].center.y >= g_screen->height
 				|| self->particles[i].center.y <= 0.0f) {
+
 			--self->num_active;
 		}
 	}
@@ -129,7 +141,6 @@ static int emitter_remove_inactive(struct emitter *self)
 		/* there is probably an optimization to be made here */
 		tail = self->num_active-1;
 		if (idx_in_free_list_rev(self, tail)) {
-			--self->num_active;
 			--self->free_count;
 			continue;
 		}
@@ -147,7 +158,7 @@ static int emitter_remove_inactive(struct emitter *self)
 	return 0;
 }
 
-int emitter_update(struct emitter *self)
+int emitter_update_draw(struct emitter *self)
 {
 	struct timespec tcur;
 	uint32_t i;
@@ -195,7 +206,7 @@ int emitter_update(struct emitter *self)
 		}
 		else {
 			draw_pixel(g_screen, self->particles[i].center.x,
-					self->particles[i].center.y, 
+					self->particles[i].center.y,
 					self->particles[i].color);
 		}
 

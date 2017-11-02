@@ -1,4 +1,17 @@
-/* (c) 2016 Michael R. Tirado -- GPLv3, GNU General Public License version 3.
+/* Copyright (C) 2017 Michael R. Tirado <mtirado418@gmail.com> -- GPLv3+
+ *
+ * This program is libre software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details. You should have
+ * received a copy of the GNU General Public License version 3
+ * along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ *
  *
  * TODO EVIOCGRAB, prevent others from reading our input?
  */
@@ -11,7 +24,6 @@
 #include <string.h>
 #include <errno.h>
 #include <sys/ioctl.h>
-#include <sys/epoll.h>
 #include <sys/types.h>
 #include <time.h>
 #include <linux/input.h>
@@ -19,13 +31,13 @@
 #include <signal.h>
 #include <termios.h>
 
-#include "../protocol/spr16.h"
-#include "../defines.h"
-#define STRERR strerror(errno)
+#include "../../spr16.h"
+#include "../../defines.h"
+#include "../../screen.h"
+#include "../fdpoll-handler.h"
+#include "platform.h"
 
-/* number of longs needed to represent n bits. */
-#define LONG_BITS (sizeof(long) * 8)
-#define NLONGS(n) ((n+LONG_BITS-1)/sizeof(long))
+#define STRERR strerror(errno)
 
 #define CURVE_SCALE   1000.0f
 
@@ -35,7 +47,9 @@ const char devdir[] = "/dev/input";
 #define TAP_DELAY  210000 /* microseconds between last tap up, for tap click */
 #define TAP_STABL  300000 /* delay permitted from last big motion */
 
-extern struct server g_server;
+extern struct server_options g_srv_opts;
+extern sig_atomic_t g_input_muted; /* don't forward input if muted */
+extern sig_atomic_t g_unmute_input;
 
 /* high level input device classification */
 enum {
@@ -91,6 +105,11 @@ struct drv_evdev_pvt {
 	struct input_absinfo absinfo[ABS_CNT];
 };
 
+struct drv_stream_pvt
+{
+	int is_ascii;
+};
+
 int generic_flush(struct input_device *self)
 {
 	tcflush(self->fd, TCIFLUSH);
@@ -125,27 +144,126 @@ int generic_flush(struct input_device *self)
 	return -1;
 }
 
+static int get_focused_client(struct server_context *ctx)
+{
+
+	if (g_input_muted || !ctx->main_screen || !ctx->main_screen->clients) {
+		return -1;
+	}
+	else {
+		if (ctx->main_screen->clients->recv_fd_wait)
+			return -1;
+		return ctx->main_screen->clients->socket;
+	}
+}
+
+static int bit_count(unsigned long bits[], unsigned int nlongs)
+{
+	int count = 0;
+	unsigned int i, z;
+	for (i = 0; i < nlongs; ++i)
+	{
+		for (z = 0; z < sizeof(long) * 8; ++z)
+		{
+			if (bits[i] & (1 << z))
+				++count;
+		}
+	}
+	return count;
+}
+static void bit_set(unsigned long *arr, uint32_t bit)
+{
+	arr[bit / LONG_BITS] |= (1LU << (bit % LONG_BITS));
+}
+static void bit_clear(unsigned long *arr, uint32_t bit)
+{
+	arr[bit / LONG_BITS] &= ~(1LU << (bit % LONG_BITS));
+}
+static int bit_check(unsigned long *arr, uint32_t bit, uint32_t bitcount)
+{
+	if (bit >= bitcount)
+		return 0;
+	return !!(arr[bit / LONG_BITS] & (1LU << (bit % LONG_BITS)));
+}
+static int btn_is_down(struct input_device *self, int keycode)
+{
+	return bit_check(self->btn_down, keycode, SPR16_KEYCODE_COUNT);
+}
+
+int input_flush_all_devices(struct input_device *list)
+{
+	struct input_device *device;
+	int ret = 0;
+
+	/* flush all devices */
+	for (device = list; device; device = device->next)
+	{
+
+		if (device->fd == -1)
+			continue;
+		if (device->func_flush(device)) {
+			printf("device %s flush failed\n", device->name);
+			ret = -1;
+		}
+		/* reset keydown state */
+		memset(device->btn_down, 0, sizeof(device->btn_down));
+	}
+	return ret;
+}
+
+static int update_state(struct server_context *ctx)
+{
+	if (g_unmute_input) {
+		g_unmute_input = 0;
+		g_input_muted = 0;
+
+		if (ctx->main_screen && ctx->main_screen->clients)
+			spr16_server_reset_client(ctx->main_screen->clients);
+		if (input_flush_all_devices(ctx->input_devices))
+			return -1;
+		server_sync_fullscreen(ctx);
+	}
+	return 0;
+}
+
 /* This is a fallback input mode that computes shift state in a hacky manner,
  * and doesnt support many useful keys like ctrl,alt,capslock,etc
  * we could add raw kbd support too, eventually...
+ *
+ * TODO track up/down state here too so we can send repeats/keyup
+ * keyup is going to require a helper thread to run a timer to send adequately
+ * timed events, is it worth all that trouble though?
+ *
+ * this might be broken have not tested since a refactor
  */
-static int transceive_ascii(struct input_device *self, int client)
+int transceive_ascii(int fd, int event_flags, void *user_data)
 {
 	unsigned char buf[1024];
 	int i, r;
+	struct input_device *self = user_data;
+	int cl_fd;
+
+	printf("ascii input callback..........\n");
+	cl_fd = get_focused_client(self->srv_ctx); /* TODO this doesn't get set yet */
+	update_state(self->srv_ctx);
+
+	/* TODO for correctness, loop until EAGAIN */
+	(void)event_flags;
 interrupted:
-	r = read(self->fd, buf, sizeof(buf));
+	r = read(fd, buf, sizeof(buf));
 	if (r == -1) {
 		if (errno == EAGAIN) {
-			return 0;
+			return FDPOLL_HANDLER_OK;
 		}
 		else if (errno == EINTR) {
 			goto interrupted;
 		}
 		printf("read input: %s\n", STRERR);
-		return -1;
+		return FDPOLL_HANDLER_REMOVE;
 	}
-	if (client != -1) {
+	if (!spr16_server_is_active())
+		return FDPOLL_HANDLER_OK;
+	if (cl_fd != -1) {
 		/* 1 char == 1 keycode */
 		for (i = 0; i < r; ++i)
 		{
@@ -155,20 +273,23 @@ interrupted:
 			data.code = buf[i];
 			data.type = SPR16_INPUT_KEY_ASCII;
 			data.id = self->device_id;
-			if (spr16_write_msg(client, &hdr, &data, sizeof(data))) {
-				return (errno == EAGAIN) ? 0 : -1;
+			if (spr16_write_msg(cl_fd, &hdr, &data, sizeof(data))) {
+				return FDPOLL_HANDLER_OK;
 			}
 		}
 	}
-	return 0;
+	return FDPOLL_HANDLER_OK;
 }
 
-static int transceive_raw(struct input_device *self, int client)
+int transceive_raw(int fd, int event_flags, void *user_data)
 {
+	struct input_device *self = user_data;
+	update_state(self->srv_ctx);
 	/* TODO */
-	(void)self;
-	(void)client;
-	return -1;
+	(void)fd;
+	(void)event_flags;
+	(void)user_data;
+	return FDPOLL_HANDLER_REMOVE;
 }
 
 static int usecs_elapsed(struct timespec curtime, struct timespec timestamp)
@@ -196,9 +317,40 @@ static void trackpad_tap_up(struct drv_evdev_pvt *pvt)
 	pvt->tap_up_y = pvt->track_y;
 }
 
+static int set_input_msg(struct input_device *self,
+			 struct spr16_msgdata_input *msg,
+			 int code)
+{
+	if (code < 0 || code >= SPR16_KEYCODE_COUNT)
+		return -1;
+
+	msg->code = code;
+
+	switch (msg->val)
+	{
+	case 0: /* up */
+		if (!btn_is_down(self, code))
+			return -1; /* don't forward event */
+		bit_clear(self->btn_down, code);
+		break;
+	case 1: /* down*/
+		bit_set(self->btn_down, code);
+		break;
+	case 2: /* repeat*/
+		if (!btn_is_down(self, code))
+			return -1;
+		break;
+	default:
+		return -1;
+	}
+	return 0;
+}
+
 static int evdev_translate_btns(struct input_device *self, struct spr16_msgdata_input *msg)
 {
 	struct drv_evdev_pvt *pvt = self->private;
+	/* for touchpads, should we track button down/up's? probably more
+	 * trouble than it's worth considering multitouch tacks on contact id's */
 	if (pvt->touch_lbtn == msg->code) {
 		msg->code = SPR16_KEYCODE_LBTN;
 		return 0;
@@ -221,28 +373,27 @@ static int evdev_translate_btns(struct input_device *self, struct spr16_msgdata_
 
 	switch (msg->code)
 	{
-	/*case BTN_MOUSE: == BTN_LEFT*/
-	case BTN_LEFT:    msg->code = SPR16_KEYCODE_LBTN; break;
-	case BTN_RIGHT:   msg->code = SPR16_KEYCODE_RBTN; break;
-	case BTN_MIDDLE:  msg->code = SPR16_KEYCODE_ABTN; break;
-	case BTN_BACK:    msg->code = SPR16_KEYCODE_BBTN; break;
-	case BTN_FORWARD: msg->code = SPR16_KEYCODE_CBTN; break;
-	case BTN_SIDE:    msg->code = SPR16_KEYCODE_DBTN; break;
-	case BTN_EXTRA:   msg->code = SPR16_KEYCODE_EBTN; break;
-	case BTN_TASK:    msg->code = SPR16_KEYCODE_FBTN; break;
+	/* BTN_MOUSE == BTN_LEFT */
+	case BTN_LEFT:    return set_input_msg(self, msg, SPR16_KEYCODE_LBTN);
+	case BTN_RIGHT:   return set_input_msg(self, msg, SPR16_KEYCODE_RBTN);
+	case BTN_MIDDLE:  return set_input_msg(self, msg, SPR16_KEYCODE_ABTN);
+	case BTN_BACK:    return set_input_msg(self, msg, SPR16_KEYCODE_BBTN);
+	case BTN_FORWARD: return set_input_msg(self, msg, SPR16_KEYCODE_CBTN);
+	case BTN_SIDE:    return set_input_msg(self, msg, SPR16_KEYCODE_DBTN);
+	case BTN_EXTRA:   return set_input_msg(self, msg, SPR16_KEYCODE_EBTN);
+	case BTN_TASK:    return set_input_msg(self, msg, SPR16_KEYCODE_FBTN);
 
 	case BTN_TOUCH:
-
 		if (!pvt->is_trackpad) {
 			msg->code = SPR16_KEYCODE_CONTACT;
-			break;
+			return 0;
 		}
 
 		if (msg->val == 0) {
 			/* contact up */
 			trackpad_tap_up(pvt);
 			msg->code = SPR16_KEYCODE_CONTACT;
-			break;
+			return 0;
 		}
 		else if (usecs_elapsed(pvt->curtime, pvt->last_tap_up)<TAP_DELAY) {
 			if (usecs_elapsed(pvt->curtime, pvt->last_bigmotion)<TAP_STABL) {
@@ -251,12 +402,11 @@ static int evdev_translate_btns(struct input_device *self, struct spr16_msgdata_
 			/* send contact down later, after receiving updated positions */
 			pvt->tap_check = 1;
 		}
-		return -1;
-
+		break;
 	default:
-		return -1;
+		break;
 	}
-	return 0;
+	return -1;
 }
 
 static int evdev_translate_keycode(struct input_device *self,
@@ -266,150 +416,128 @@ static int evdev_translate_keycode(struct input_device *self,
 	/* TODO still missing some important keys */
 	switch (msg->code)
 	{
-	case KEY_LEFTALT:
-		msg->code = SPR16_KEYCODE_LALT;
-		if (msg->val == 0) {
-			if (self->keyflags & SPR16_KEYMOD_LALT)
-				self->keyflags &= ~SPR16_KEYMOD_LALT;
-		}
-		else if (msg->val == 1) {
-			self->keyflags |= SPR16_KEYMOD_LALT;
-		}
-		break;
-
-	case KEY_LEFTCTRL:
-		msg->code = SPR16_KEYCODE_LCTRL;
-		if (msg->val == 0) {
-			if (self->keyflags & SPR16_KEYMOD_LCTRL)
-				self->keyflags &= ~SPR16_KEYMOD_LCTRL;
-		}
-		else if (msg->val == 1) {
-			self->keyflags |= SPR16_KEYMOD_LCTRL;
-		}
-		break;
-
-	case KEY_CAPSLOCK:   msg->code = SPR16_KEYCODE_CAPSLOCK; break;
-	case KEY_LEFTSHIFT:  msg->code = SPR16_KEYCODE_LSHIFT;   break;
-	case KEY_RIGHTSHIFT: msg->code = SPR16_KEYCODE_RSHIFT;   break;
-	case KEY_RIGHTCTRL:  msg->code = SPR16_KEYCODE_RCTRL;    break;
-	case KEY_RIGHTALT:   msg->code = SPR16_KEYCODE_RALT;     break;
-	case KEY_UP: 	     msg->code = SPR16_KEYCODE_UP;       break;
-	case KEY_DOWN:       msg->code = SPR16_KEYCODE_DOWN;     break;
-	case KEY_LEFT:       msg->code = SPR16_KEYCODE_LEFT;     break;
-	case KEY_RIGHT:      msg->code = SPR16_KEYCODE_RIGHT;    break;
-	case KEY_PAGEUP:     msg->code = SPR16_KEYCODE_PAGEUP;   break;
-	case KEY_PAGEDOWN:   msg->code = SPR16_KEYCODE_PAGEDOWN; break;
-	case KEY_HOME:       msg->code = SPR16_KEYCODE_HOME;     break;
-	case KEY_END:        msg->code = SPR16_KEYCODE_END;      break;
-	case KEY_INSERT:     msg->code = SPR16_KEYCODE_INSERT;   break;
-	case KEY_DELETE:     msg->code = SPR16_KEYCODE_DELETE;   break;
-
-	case KEY_NUMLOCK:     msg->code = SPR16_KEYCODE_NUMLOCK;    break;
-	case KEY_KP0:         msg->code = SPR16_KEYCODE_NP0;        break;
-	case KEY_KP1:         msg->code = SPR16_KEYCODE_NP1;        break;
-	case KEY_KP2:         msg->code = SPR16_KEYCODE_NP2;        break;
-	case KEY_KP3:         msg->code = SPR16_KEYCODE_NP3;        break;
-	case KEY_KP4:         msg->code = SPR16_KEYCODE_NP4;        break;
-	case KEY_KP5:         msg->code = SPR16_KEYCODE_NP5;        break;
-	case KEY_KP6:         msg->code = SPR16_KEYCODE_NP6;        break;
-	case KEY_KP7:         msg->code = SPR16_KEYCODE_NP7;        break;
-	case KEY_KP8:         msg->code = SPR16_KEYCODE_NP8;        break;
-	case KEY_KP9:         msg->code = SPR16_KEYCODE_NP9;        break;
-	case KEY_KPSLASH:     msg->code = SPR16_KEYCODE_NPSLASH;    break;
-	case KEY_KPASTERISK:  msg->code = SPR16_KEYCODE_NPASTERISK; break;
-	case KEY_KPPLUS:      msg->code = SPR16_KEYCODE_NPPLUS;     break;
-	case KEY_KPMINUS:     msg->code = SPR16_KEYCODE_NPMINUS;    break;
-	case KEY_KPDOT:       msg->code = SPR16_KEYCODE_NPDOT;      break;
-	case KEY_KPENTER:     msg->code = SPR16_KEYCODE_NPENTER;    break;
+	case KEY_LEFTALT:    return set_input_msg(self, msg, SPR16_KEYCODE_LALT);
+	case KEY_LEFTCTRL:   return set_input_msg(self, msg, SPR16_KEYCODE_LCTRL);
+	case KEY_CAPSLOCK:   return set_input_msg(self, msg, SPR16_KEYCODE_CAPSLOCK);
+	case KEY_LEFTSHIFT:  return set_input_msg(self, msg, SPR16_KEYCODE_LSHIFT);
+	case KEY_RIGHTSHIFT: return set_input_msg(self, msg, SPR16_KEYCODE_RSHIFT);
+	case KEY_RIGHTCTRL:  return set_input_msg(self, msg, SPR16_KEYCODE_RCTRL);
+	case KEY_RIGHTALT:   return set_input_msg(self, msg, SPR16_KEYCODE_RALT);
+	case KEY_UP: 	     return set_input_msg(self, msg, SPR16_KEYCODE_UP);
+	case KEY_DOWN:       return set_input_msg(self, msg, SPR16_KEYCODE_DOWN);
+	case KEY_LEFT:       return set_input_msg(self, msg, SPR16_KEYCODE_LEFT);
+	case KEY_RIGHT:      return set_input_msg(self, msg, SPR16_KEYCODE_RIGHT);
+	case KEY_PAGEUP:     return set_input_msg(self, msg, SPR16_KEYCODE_PAGEUP);
+	case KEY_PAGEDOWN:   return set_input_msg(self, msg, SPR16_KEYCODE_PAGEDOWN);
+	case KEY_HOME:       return set_input_msg(self, msg, SPR16_KEYCODE_HOME);
+	case KEY_END:        return set_input_msg(self, msg, SPR16_KEYCODE_END);
+	case KEY_INSERT:     return set_input_msg(self, msg, SPR16_KEYCODE_INSERT);
+	case KEY_DELETE:     return set_input_msg(self, msg, SPR16_KEYCODE_DELETE);
+	case KEY_NUMLOCK:    return set_input_msg(self, msg, SPR16_KEYCODE_NUMLOCK);
+	case KEY_KP0:        return set_input_msg(self, msg, SPR16_KEYCODE_NP0);
+	case KEY_KP1:        return set_input_msg(self, msg, SPR16_KEYCODE_NP1);
+	case KEY_KP2:        return set_input_msg(self, msg, SPR16_KEYCODE_NP2);
+	case KEY_KP3:        return set_input_msg(self, msg, SPR16_KEYCODE_NP3);
+	case KEY_KP4:        return set_input_msg(self, msg, SPR16_KEYCODE_NP4);
+	case KEY_KP5:        return set_input_msg(self, msg, SPR16_KEYCODE_NP5);
+	case KEY_KP6:        return set_input_msg(self, msg, SPR16_KEYCODE_NP6);
+	case KEY_KP7:        return set_input_msg(self, msg, SPR16_KEYCODE_NP7);
+	case KEY_KP8:        return set_input_msg(self, msg, SPR16_KEYCODE_NP8);
+	case KEY_KP9:        return set_input_msg(self, msg, SPR16_KEYCODE_NP9);
+	case KEY_KPSLASH:    return set_input_msg(self, msg, SPR16_KEYCODE_NPSLASH);
+	case KEY_KPASTERISK: return set_input_msg(self, msg, SPR16_KEYCODE_NPASTERISK);
+	case KEY_KPPLUS:     return set_input_msg(self, msg, SPR16_KEYCODE_NPPLUS);
+	case KEY_KPMINUS:    return set_input_msg(self, msg, SPR16_KEYCODE_NPMINUS);
+	case KEY_KPDOT:      return set_input_msg(self, msg, SPR16_KEYCODE_NPDOT);
+	case KEY_KPENTER:    return set_input_msg(self, msg, SPR16_KEYCODE_NPENTER);
 
 
-	case KEY_F1:  msg->code = SPR16_KEYCODE_F1;  break;
-	case KEY_F2:  msg->code = SPR16_KEYCODE_F2;  break;
-	case KEY_F3:  msg->code = SPR16_KEYCODE_F3;  break;
-	case KEY_F4:  msg->code = SPR16_KEYCODE_F4;  break;
-	case KEY_F5:  msg->code = SPR16_KEYCODE_F5;  break;
-	case KEY_F6:  msg->code = SPR16_KEYCODE_F6;  break;
-	case KEY_F7:  msg->code = SPR16_KEYCODE_F7;  break;
-	case KEY_F8:  msg->code = SPR16_KEYCODE_F8;  break;
-	case KEY_F9:  msg->code = SPR16_KEYCODE_F9;  break;
-	case KEY_F10: msg->code = SPR16_KEYCODE_F10; break;
-	case KEY_F11: msg->code = SPR16_KEYCODE_F11; break;
-	case KEY_F12: msg->code = SPR16_KEYCODE_F12; break;
-	case KEY_F13: msg->code = SPR16_KEYCODE_F13; break;
-	case KEY_F14: msg->code = SPR16_KEYCODE_F14; break;
-	case KEY_F15: msg->code = SPR16_KEYCODE_F15; break;
-	case KEY_F16: msg->code = SPR16_KEYCODE_F16; break;
-	case KEY_F17: msg->code = SPR16_KEYCODE_F17; break;
-	case KEY_F18: msg->code = SPR16_KEYCODE_F18; break;
-	case KEY_F19: msg->code = SPR16_KEYCODE_F19; break;
-	case KEY_F20: msg->code = SPR16_KEYCODE_F20; break;
-	case KEY_F21: msg->code = SPR16_KEYCODE_F21; break;
-	case KEY_F22: msg->code = SPR16_KEYCODE_F22; break;
-	case KEY_F23: msg->code = SPR16_KEYCODE_F23; break;
-	case KEY_F24: msg->code = SPR16_KEYCODE_F24; break;
+	case KEY_F1:  return set_input_msg(self, msg, SPR16_KEYCODE_F1);
+	case KEY_F2:  return set_input_msg(self, msg, SPR16_KEYCODE_F2);
+	case KEY_F3:  return set_input_msg(self, msg, SPR16_KEYCODE_F3);
+	case KEY_F4:  return set_input_msg(self, msg, SPR16_KEYCODE_F4);
+	case KEY_F5:  return set_input_msg(self, msg, SPR16_KEYCODE_F5);
+	case KEY_F6:  return set_input_msg(self, msg, SPR16_KEYCODE_F6);
+	case KEY_F7:  return set_input_msg(self, msg, SPR16_KEYCODE_F7);
+	case KEY_F8:  return set_input_msg(self, msg, SPR16_KEYCODE_F8);
+	case KEY_F9:  return set_input_msg(self, msg, SPR16_KEYCODE_F9);
+	case KEY_F10: return set_input_msg(self, msg, SPR16_KEYCODE_F10);
+	case KEY_F11: return set_input_msg(self, msg, SPR16_KEYCODE_F11);
+	case KEY_F12: return set_input_msg(self, msg, SPR16_KEYCODE_F12);
+	case KEY_F13: return set_input_msg(self, msg, SPR16_KEYCODE_F13);
+	case KEY_F14: return set_input_msg(self, msg, SPR16_KEYCODE_F14);
+	case KEY_F15: return set_input_msg(self, msg, SPR16_KEYCODE_F15);
+	case KEY_F16: return set_input_msg(self, msg, SPR16_KEYCODE_F16);
+	case KEY_F17: return set_input_msg(self, msg, SPR16_KEYCODE_F17);
+	case KEY_F18: return set_input_msg(self, msg, SPR16_KEYCODE_F18);
+	case KEY_F19: return set_input_msg(self, msg, SPR16_KEYCODE_F19);
+	case KEY_F20: return set_input_msg(self, msg, SPR16_KEYCODE_F20);
+	case KEY_F21: return set_input_msg(self, msg, SPR16_KEYCODE_F21);
+	case KEY_F22: return set_input_msg(self, msg, SPR16_KEYCODE_F22);
+	case KEY_F23: return set_input_msg(self, msg, SPR16_KEYCODE_F23);
+	case KEY_F24: return set_input_msg(self, msg, SPR16_KEYCODE_F24);
 
-	/*case KEY_KPASTERISK: msg->code =  break;*/
-	/*case KEY_CAPSLOCK:   msg->code = shift ? '' : ''; break;*/
+	/*case KEY_KPASTERISK: return set_input_msg(self, msg,  break;*/
+	/*case KEY_CAPSLOCK:   return set_input_msg(self, msg, shift ? '' : '');*/
 
 	/* chars <= 127 */
-	case KEY_ESC: msg->code = 27; break;  /* ascii escape code */
-	case KEY_0: msg->code = shift ? ')' : '0'; break;
-	case KEY_1: msg->code = shift ? '!' : '1'; break;
-	case KEY_2: msg->code = shift ? '@' : '2'; break;
-	case KEY_3: msg->code = shift ? '#' : '3'; break;
-	case KEY_4: msg->code = shift ? '$' : '4'; break;
-	case KEY_5: msg->code = shift ? '%' : '5'; break;
-	case KEY_6: msg->code = shift ? '^' : '6'; break;
-	case KEY_7: msg->code = shift ? '&' : '7'; break;
-		case KEY_8: msg->code = shift ? '*' : '8'; break;
-	case KEY_9: msg->code = shift ? '(' : '9'; break;
+	case KEY_ESC: return set_input_msg(self, msg, 27);  /* ascii escape code */
+	case KEY_0:   return set_input_msg(self, msg, shift ? ')' : '0');
+	case KEY_1:   return set_input_msg(self, msg, shift ? '!' : '1');
+	case KEY_2:   return set_input_msg(self, msg, shift ? '@' : '2');
+	case KEY_3:   return set_input_msg(self, msg, shift ? '#' : '3');
+	case KEY_4:   return set_input_msg(self, msg, shift ? '$' : '4');
+	case KEY_5:   return set_input_msg(self, msg, shift ? '%' : '5');
+	case KEY_6:   return set_input_msg(self, msg, shift ? '^' : '6');
+	case KEY_7:   return set_input_msg(self, msg, shift ? '&' : '7');
+	case KEY_8:   return set_input_msg(self, msg, shift ? '*' : '8');
+	case KEY_9:   return set_input_msg(self, msg, shift ? '(' : '9');
 
-	case KEY_MINUS:      msg->code = shift ? '_'  : '-' ; break;
-	case KEY_EQUAL:      msg->code = shift ? '+'  : '=' ; break;
-	case KEY_BACKSPACE:  msg->code = shift ? '\b' : '\b'; break;
-	case KEY_TAB:        msg->code = shift ? '\t' : '\t'; break;
-	case KEY_LEFTBRACE:  msg->code = shift ? '{'  : '[' ; break;
-	case KEY_RIGHTBRACE: msg->code = shift ? '}'  : ']' ; break;
-	case KEY_ENTER:      msg->code = shift ? '\n' : '\n'; break;
-	case KEY_SEMICOLON:  msg->code = shift ? ':'  : ';' ; break;
-	case KEY_APOSTROPHE: msg->code = shift ? '"'  : '\''; break;
-	case KEY_GRAVE:      msg->code = shift ? '~'  : '`' ; break;
-	case KEY_BACKSLASH:  msg->code = shift ? '|'  : '\\'; break;
-	case KEY_COMMA:      msg->code = shift ? '<'  : ',' ; break;
-	case KEY_DOT:        msg->code = shift ? '>'  : '.' ; break;
-	case KEY_SLASH:      msg->code = shift ? '?'  : '/' ; break;
-	case KEY_SPACE:      msg->code = shift ? ' '  : ' ' ; break;
+	case KEY_MINUS:      return set_input_msg(self, msg, shift ? '_'  : '-' );
+	case KEY_EQUAL:      return set_input_msg(self, msg, shift ? '+'  : '=' );
+	case KEY_BACKSPACE:  return set_input_msg(self, msg, shift ? '\b' : '\b');
+	case KEY_TAB:        return set_input_msg(self, msg, shift ? '\t' : '\t');
+	case KEY_LEFTBRACE:  return set_input_msg(self, msg, shift ? '{'  : '[' );
+	case KEY_RIGHTBRACE: return set_input_msg(self, msg, shift ? '}'  : ']' );
+	case KEY_ENTER:      return set_input_msg(self, msg, shift ? '\n' : '\n');
+	case KEY_SEMICOLON:  return set_input_msg(self, msg, shift ? ':'  : ';' );
+	case KEY_APOSTROPHE: return set_input_msg(self, msg, shift ? '"'  : '\'');
+	case KEY_GRAVE:      return set_input_msg(self, msg, shift ? '~'  : '`' );
+	case KEY_BACKSLASH:  return set_input_msg(self, msg, shift ? '|'  : '\\');
+	case KEY_COMMA:      return set_input_msg(self, msg, shift ? '<'  : ',' );
+	case KEY_DOT:        return set_input_msg(self, msg, shift ? '>'  : '.' );
+	case KEY_SLASH:      return set_input_msg(self, msg, shift ? '?'  : '/' );
+	case KEY_SPACE:      return set_input_msg(self, msg, shift ? ' '  : ' ' );
 
-	case KEY_A: msg->code = shift ? 'A' : 'a'; break;
-	case KEY_B: msg->code = shift ? 'B' : 'b'; break;
-	case KEY_C: msg->code = shift ? 'C' : 'c'; break;
-	case KEY_D: msg->code = shift ? 'D' : 'd'; break;
-	case KEY_E: msg->code = shift ? 'E' : 'e'; break;
-	case KEY_F: msg->code = shift ? 'F' : 'f'; break;
-	case KEY_G: msg->code = shift ? 'G' : 'g'; break;
-	case KEY_H: msg->code = shift ? 'H' : 'h'; break;
-	case KEY_I: msg->code = shift ? 'I' : 'i'; break;
-	case KEY_J: msg->code = shift ? 'J' : 'j'; break;
-	case KEY_K: msg->code = shift ? 'K' : 'k'; break;
-	case KEY_L: msg->code = shift ? 'L' : 'l'; break;
-	case KEY_M: msg->code = shift ? 'M' : 'm'; break;
-	case KEY_N: msg->code = shift ? 'N' : 'n'; break;
-	case KEY_O: msg->code = shift ? 'O' : 'o'; break;
-	case KEY_P: msg->code = shift ? 'P' : 'p'; break;
-	case KEY_Q: msg->code = shift ? 'Q' : 'q'; break;
-	case KEY_R: msg->code = shift ? 'R' : 'r'; break;
-	case KEY_S: msg->code = shift ? 'S' : 's'; break;
-	case KEY_T: msg->code = shift ? 'T' : 't'; break;
-	case KEY_U: msg->code = shift ? 'U' : 'u'; break;
-	case KEY_V: msg->code = shift ? 'V' : 'v'; break;
-	case KEY_W: msg->code = shift ? 'W' : 'w'; break;
-	case KEY_X: msg->code = shift ? 'X' : 'x'; break;
-	case KEY_Y: msg->code = shift ? 'Y' : 'Y'; break;
-	case KEY_Z: msg->code = shift ? 'Z' : 'z'; break;
+	case KEY_A: return set_input_msg(self, msg, shift ? 'A' : 'a');
+	case KEY_B: return set_input_msg(self, msg, shift ? 'B' : 'b');
+	case KEY_C: return set_input_msg(self, msg, shift ? 'C' : 'c');
+	case KEY_D: return set_input_msg(self, msg, shift ? 'D' : 'd');
+	case KEY_E: return set_input_msg(self, msg, shift ? 'E' : 'e');
+	case KEY_F: return set_input_msg(self, msg, shift ? 'F' : 'f');
+	case KEY_G: return set_input_msg(self, msg, shift ? 'G' : 'g');
+	case KEY_H: return set_input_msg(self, msg, shift ? 'H' : 'h');
+	case KEY_I: return set_input_msg(self, msg, shift ? 'I' : 'i');
+	case KEY_J: return set_input_msg(self, msg, shift ? 'J' : 'j');
+	case KEY_K: return set_input_msg(self, msg, shift ? 'K' : 'k');
+	case KEY_L: return set_input_msg(self, msg, shift ? 'L' : 'l');
+	case KEY_M: return set_input_msg(self, msg, shift ? 'M' : 'm');
+	case KEY_N: return set_input_msg(self, msg, shift ? 'N' : 'n');
+	case KEY_O: return set_input_msg(self, msg, shift ? 'O' : 'o');
+	case KEY_P: return set_input_msg(self, msg, shift ? 'P' : 'p');
+	case KEY_Q: return set_input_msg(self, msg, shift ? 'Q' : 'q');
+	case KEY_R: return set_input_msg(self, msg, shift ? 'R' : 'r');
+	case KEY_S: return set_input_msg(self, msg, shift ? 'S' : 's');
+	case KEY_T: return set_input_msg(self, msg, shift ? 'T' : 't');
+	case KEY_U: return set_input_msg(self, msg, shift ? 'U' : 'u');
+	case KEY_V: return set_input_msg(self, msg, shift ? 'V' : 'v');
+	case KEY_W: return set_input_msg(self, msg, shift ? 'W' : 'w');
+	case KEY_X: return set_input_msg(self, msg, shift ? 'X' : 'x');
+	case KEY_Y: return set_input_msg(self, msg, shift ? 'Y' : 'Y');
+	case KEY_Z: return set_input_msg(self, msg, shift ? 'Z' : 'z');
 
-	default: return evdev_translate_btns(self, msg);
 	}
-	return 0;
+	return evdev_translate_btns(self, msg);
 }
 
 /*
@@ -425,6 +553,7 @@ int preempt_keycodes(struct input_device *self, struct spr16_msgdata_input *msg)
 
 	switch (msg->code)
 	{
+	/* linux vt switch keys if alt is down */
 	case SPR16_KEYCODE_F1:
 	case SPR16_KEYCODE_F2:
 	case SPR16_KEYCODE_F3:
@@ -451,23 +580,27 @@ int preempt_keycodes(struct input_device *self, struct spr16_msgdata_input *msg)
 	case SPR16_KEYCODE_F24:
 	case SPR16_KEYCODE_LEFT:
 	case SPR16_KEYCODE_RIGHT:
-		if (self->keyflags & SPR16_KEYMOD_LALT) {
+		if (btn_is_down(self, SPR16_KEYCODE_LALT)) {
 			return 1;
 		}
 		break;
+
 	case SPR16_KEYCODE_ESCAPE:
-		if ((self->keyflags & (SPR16_KEYMOD_LALT | SPR16_KEYMOD_LCTRL))
-				   == (SPR16_KEYMOD_LALT | SPR16_KEYMOD_LCTRL)) {
-			printf("abrupt screen shutdown\n");
-			raise(SIGTERM);
+		if (btn_is_down(self, SPR16_KEYCODE_LALT)
+				&& btn_is_down(self, SPR16_KEYCODE_LCTRL)) {
+			if (self->func_hotkey)
+				self->func_hotkey(SPR16_HOTKEY_AXE, NULL);
+			else
+				raise(SIGTERM);
 			return 1;
 		}
 		break;
+
 	case '\t':
-		if ((self->keyflags & (SPR16_KEYMOD_LALT | SPR16_KEYMOD_LCTRL))
-				   == (SPR16_KEYMOD_LALT | SPR16_KEYMOD_LCTRL)) {
+		if (btn_is_down(self, SPR16_KEYCODE_LALT)
+				&& btn_is_down(self, SPR16_KEYCODE_LCTRL)) {
 			if (self->func_hotkey)
-				self->func_hotkey(SPR16_HOTKEY_NEXTSCREEN, NULL);
+				self->func_hotkey(SPR16_HOTKEY_NEXTSCREEN, self->srv_ctx);
 			return 1;
 		}
 		break;
@@ -741,10 +874,10 @@ static unsigned int consume_surface_report(struct input_device *self, int client
 		printf("protocolA is currently not supported\n");
 		/* TODO protocol A contacts ? */
 		/* use active_id instead of active_contact  there is a
-		 * slight bug where up event doesnt gets lost when spamming 3
+		 * slight bug where up event gets lost when spamming 3
 		 * finger touches, so a new id will come through in a used slot.
 		 * this is why i'm sending slot number instead of tracking id
-		 * right now, i don't have any other multitouch hardware.
+		 * right now, i don't have any other multitouch hardware :S
 		 */
 		break;
 
@@ -781,11 +914,13 @@ ret_out:
 
 
 /* TODO SYN_DROPPED!! also hardware repeats are getting ignored by Xorg
- * also, we probably want to EVIOCGRAB, is that essentially locking the device?
+ * also, we probably want to EVIOCGRAB/REVOKE
  * */
 #define EV_BUF ((EV_MAX+1)*2)
-static int transceive_evdev(struct input_device *self, int client)
+int transceive_evdev(int fd, int event_flags, void *user_data)
 {
+	struct input_device *self = user_data;
+	int cl_fd;
 	/* TODO gui+config file settings for these */
 	const float min_delta = 0.000075f; /* % of surface */
 	const float max_delta = 1.0f;
@@ -796,22 +931,32 @@ static int transceive_evdev(struct input_device *self, int client)
 	unsigned int i, count;
 	int r;
 
+
+	cl_fd = get_focused_client(self->srv_ctx);
+	update_state(self->srv_ctx);
+
+	/* TODO for correctness loop until EAGAIN */
+	(void)event_flags;
 	clock_gettime(CLOCK_MONOTONIC_RAW, &pvt->curtime);
 interrupted:
-	r = read(self->fd, events, sizeof(events));
+	r = read(fd, events, sizeof(events));
 	if (r == -1) {
 		if (errno == EAGAIN) {
-			return 0;
+			return FDPOLL_HANDLER_OK;
 		}
 		else if (errno == EINTR) {
 			goto interrupted;
 		}
-		fprintf(stderr, "read input: %s\n", STRERR);
-		return -1;
+		return FDPOLL_HANDLER_REMOVE;
 	}
+
+	if (!spr16_server_is_active()) {
+		return FDPOLL_HANDLER_OK;
+	}
+
 	if (r < (int)sizeof(struct input_event)
 			|| r % (int)sizeof(struct input_event)) {
-		return -1;
+		return FDPOLL_HANDLER_REMOVE;
 	}
 	count = r / sizeof(struct input_event);
 
@@ -836,7 +981,6 @@ interrupted:
 				continue;
 			if (preempt_keycodes(self, &data))
 				continue;
-
 			break;
 
 		case EV_REL:
@@ -872,7 +1016,7 @@ interrupted:
 			data.val  = event->value;
 			/* multi-touch surface */
 			if (data.code >= ABS_MT_SLOT && data.code <= ABS_MT_TOOL_Y) {
-				i+= consume_surface_report(self,client,events,i,count);
+				i+= consume_surface_report(self,cl_fd,events,i,count);
 				continue;
 			}
 			else if (data.code >= ABS_CNT) {
@@ -899,18 +1043,21 @@ interrupted:
 			continue;
 		}
 
-		if (client == -1)
-			return 0; /* TODO this is prolly wrong, should continue to check
-				     for SYN_DROPPED and change state if needed.
-				     how to test that?? */
-		if (spr16_write_msg(client, &hdr, &data, sizeof(data))) {
+		if (cl_fd == -1) {
+			return FDPOLL_HANDLER_OK; /* TODO this is prolly wrong,
+						     should continue to check
+				     	for SYN_DROPPED and change state if needed.
+				     	how to test that?? */
+		}
+		if (spr16_write_msg(cl_fd, &hdr, &data, sizeof(data))) {
 			/* FIXME eagain will end up dropping events,
 			 *
 			 * message functions could be handled a little better,
 			 * like a peer object that can buffer events to handle eagain.
 			 * and send all messages once instead of multiple syscalls.
 			 */
-			return (errno == EAGAIN) ? 0 : -1;
+			/*return (errno == EAGAIN) ? 0 : -1;*/
+			return FDPOLL_HANDLER_OK;
 		}
 	}
 
@@ -925,13 +1072,14 @@ interrupted:
 			data.id   = self->device_id;
 			data.code = SPR16_KEYCODE_CONTACT;
 			data.val  = 1;
-			if (spr16_write_msg(client, &hdr, &data, sizeof(data))) {
+			if (spr16_write_msg(cl_fd, &hdr, &data, sizeof(data))) {
 				/* FIXME too  ^^ */
-				return (errno == EAGAIN) ? 0 : -1;
+				/*return (errno == EAGAIN) ? 0 : -1;*/
+				return FDPOLL_HANDLER_OK;
 			}
 		}
 	}
-	return 0;
+	return FDPOLL_HANDLER_OK;
 }
 
 /*
@@ -1007,35 +1155,6 @@ static struct prospective_path *check_environ(int dev_class)
 
 	snprintf(g_prospect.path, sizeof(g_prospect.path), "%s/%s", devdir, e);
 	return &g_prospect;
-}
-
-static int bit_count(unsigned long bits[], unsigned int nlongs)
-{
-	int count = 0;
-	unsigned int i, z;
-	for (i = 0; i < nlongs; ++i)
-	{
-		for (z = 0; z < sizeof(long) * 8; ++z)
-		{
-			if (bits[i] & (1 << z))
-				++count;
-		}
-	}
-	return count;
-}
-/*static void bit_set(unsigned long *arr, uint32_t bit)
-{
-	arr[bit / LONG_BITS] |= (1LU << (bit % LONG_BITS));
-}*/
-static void bit_clear(unsigned long *arr, uint32_t bit)
-{
-	arr[bit / LONG_BITS] &= ~(1LU << (bit % LONG_BITS));
-}
-static int bit_check(unsigned long *arr, uint32_t bit, uint32_t bitcount)
-{
-	if (bit >= bitcount)
-		return 0;
-	return !!(arr[bit / LONG_BITS] & (1LU << (bit % LONG_BITS)));
 }
 
 /* potentially, but not probably */
@@ -1207,18 +1326,21 @@ static int add_device(struct input_device *dev, struct input_device **device_lis
 void evdev_load_settings(struct drv_evdev_pvt *pvt, unsigned int dev_class)
 {
 	if (dev_class == SPR16_DEV_MOUSE || dev_class == SPR16_DEV_TOUCH) {
-		pvt->relative_accel = g_server.pointer_accel;
-		pvt->vscroll_amount = g_server.vscroll_amount;
+		pvt->relative_accel = g_srv_opts.pointer_accel;
+		pvt->vscroll_amount = g_srv_opts.vscroll_amount;
 	}
 }
 
 /*
  * TODO, check for duplicates, EVIOCGRAB or use owner/group
  */
-int evdev_instantiate(struct input_device **device_list,
-				int epoll_fd, char *devpath, unsigned int dev_class)
+int evdev_instantiate(struct server_context *ctx,
+		      char *devpath,
+		      unsigned int dev_class)
 {
-	struct epoll_event ev;
+
+	struct fdpoll_handler *fdpoll = ctx->fdpoll;
+	struct input_device **device_list = &ctx->input_devices;
 	struct input_device *dev = NULL;
 	struct drv_evdev_pvt *pvt = NULL;
 	char devname[64];
@@ -1232,13 +1354,6 @@ int evdev_instantiate(struct input_device **device_list,
 	}
 	if (ioctl(devfd, EVIOCGNAME(sizeof(devname)-1), devname) == -1) {
 		printf("evdev get name: %s\n", STRERR);
-		return -1;
-	}
-	memset(&ev, 0, sizeof(ev));
-	ev.events = EPOLLIN;
-	ev.data.fd = devfd;
-	if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, devfd, &ev)) {
-		printf("epoll_ctl(add): %s\n", STRERR);
 		return -1;
 	}
 
@@ -1365,7 +1480,6 @@ int evdev_instantiate(struct input_device **device_list,
 			}
 		}
 	}
-(void)bit_clear;
 #if 0
 	/* ignore regular ABS if multitouch surface*/
 	if (pvt->is_mt_surface) {
@@ -1403,27 +1517,39 @@ int evdev_instantiate(struct input_device **device_list,
 	snprintf(dev->name, sizeof(dev->name), "%s", devname);
 	snprintf(dev->path, sizeof(dev->path), "%s", devpath);
 	dev->fd = devfd;
-	dev->func_transceive = transceive_evdev;
 	dev->func_flush = generic_flush;
 	dev->private = pvt;
-	if (add_device(dev, device_list))
+	dev->srv_ctx = ctx;
+
+	printf("adding evdev device(%s)\n", devpath);
+	if (fdpoll_handler_add(fdpoll, devfd, FDPOLLIN, transceive_evdev, dev)) {
+		printf("fdpoll_handler_add(%d) failed, evdev input\n", devfd);
 		goto err_free;
+	}
+
+	if (add_device(dev, device_list)) {
+		fdpoll_handler_remove(fdpoll, devfd);
+		goto err_free;
+	}
+
 	return 0;
+
 err_free:
 	free(pvt);
 	free(dev);
 	return -1;
 }
 
-static int load_stream(struct input_device **device_list, int epoll_fd,
-			int streamfd, int mode)
+/* TODO setup drv struct for callback, change name to instantiate for consistency */
+static int load_stream(struct server_context *ctx, int streamfd, int mode)
 {
-	struct epoll_event ev;
-	struct input_device *dev;
-	int fl;
 
-	memset(&ev, 0, sizeof(ev));
+	struct fdpoll_handler *fdpoll = ctx->fdpoll;
+	struct input_device **device_list = &ctx->input_devices;
+	struct input_device *dev;
+
 	/* set to nonblocking */
+	/*int fl;
 	fl = fcntl(streamfd, F_GETFL);
 	if (fl == -1) {
 		printf("fcntl(GETFL): %s\n", STRERR);
@@ -1432,61 +1558,69 @@ static int load_stream(struct input_device **device_list, int epoll_fd,
 	if (fcntl(streamfd, F_SETFL, fl | O_NONBLOCK) == -1) {
 		printf("fcntl(SETFL, O_NONBLOCK): %s\n", STRERR);
 		return -1;
-	}
-
-	ev.events = EPOLLIN;
-	ev.data.fd = streamfd;
-	if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, streamfd, &ev)) {
-		printf("epoll_ctl(add): %s\n", STRERR);
-		return -1;
-	}
+	}*/
 	/*if (tcsetpgrp(streamfd, getpgid(0)) == -1) {
 		printf("tcsetpgrp: %s\n", STRERR);
 		return -1;
 	}*/
+
 	dev = calloc(1, sizeof(struct input_device));
 	if (dev == NULL)
 		return -1;
 	dev->fd = streamfd;
+	dev->srv_ctx = ctx;
 	if (mode == 1) {
 		snprintf(dev->name, sizeof(dev->name), "ascii-stream");
-		dev->func_transceive  = transceive_ascii;
 		dev->func_flush = generic_flush;
+		if (fdpoll_handler_add(fdpoll, streamfd, FDPOLLIN,
+					transceive_ascii, dev)) {
+			printf("fdpoll_handler_add(%d) failed, ascii input\n", streamfd);
+			return -1;
+		}
 	}
 	else {
 		snprintf(dev->name, sizeof(dev->name), "raw-stream");
-		dev->func_transceive  = transceive_raw;
 		dev->func_flush = generic_flush;
+		if (fdpoll_handler_add(fdpoll, streamfd, FDPOLLIN,
+					transceive_raw, dev)) {
+			printf("fdpoll_handler_add(%d) failed, raw input\n", streamfd);
+			return -1;;
+		}
 	}
+
 	if (add_device(dev, device_list)) {
 		free(dev);
+		fdpoll_handler_remove(fdpoll, streamfd);
 		return -1;
 	}
 	return 0;
 }
 
-void load_linux_input_drivers(struct input_device **device_list,
-		int epoll_fd, int stdin_mode, int evdev, input_hotkey hk)
+void load_linux_input_drivers(struct server_context *ctx,
+			      int stdin_mode,
+			      int evdev,
+			      input_hotkey hk)
 {
+	struct input_device **device_list = &ctx->input_devices;
 
 	/* ascii */
 	if (stdin_mode == 1) {
-		load_stream(device_list, epoll_fd, STDIN_FILENO, 1);
+		load_stream(ctx, STDIN_FILENO, 1);
 	} /* raw */
 	else if (stdin_mode == 2) {
-		load_stream(device_list, epoll_fd, STDIN_FILENO, 2);
+		load_stream(ctx, STDIN_FILENO, 2);
 	}
 
 	if (evdev) {
 		struct prospective_path *prp;
 
+		/* TODO, fix ascii/raw, don't use evdev kbd if they are specified */
 		prp = check_environ(SPR16_DEV_KEYBOARD);
 		if (prp == NULL) {
 			prp = find_most_capable(SPR16_DEV_KEYBOARD);
 		}
 		if (prp) {
-			if (evdev_instantiate(device_list, epoll_fd,
-						prp->path, SPR16_DEV_KEYBOARD)) {
+			if (evdev_instantiate(ctx, prp->path, SPR16_DEV_KEYBOARD)) {
 				printf("evdev instantiate kbd failed %s\n", prp->path);
 			}
 			else {
@@ -1500,8 +1634,7 @@ void load_linux_input_drivers(struct input_device **device_list,
 			prp = find_most_capable(SPR16_DEV_MOUSE);
 		}
 		if (prp) {
-			if (evdev_instantiate(device_list, epoll_fd,
-						prp->path, SPR16_DEV_MOUSE)) {
+			if (evdev_instantiate(ctx, prp->path, SPR16_DEV_MOUSE)) {
 				printf("evdev instantiate mouse failed %s\n", prp->path);
 			}
 			else {
@@ -1514,8 +1647,7 @@ void load_linux_input_drivers(struct input_device **device_list,
 			prp = find_most_capable(SPR16_DEV_TOUCH);
 		}
 		if (prp) {
-			if (evdev_instantiate(device_list, epoll_fd,
-						prp->path, SPR16_DEV_TOUCH)) {
+			if (evdev_instantiate(ctx, prp->path, SPR16_DEV_TOUCH)) {
 				printf("evdev instantiate touch failed %s\n", prp->path);
 			}
 			else {
@@ -1535,40 +1667,4 @@ void load_linux_input_drivers(struct input_device **device_list,
 		}
 	}
 }
-
-
-
-/* arggh this doesn't work with my USB keyboard :\ */
-#if 0
-static int evdev_print_keycodes(struct input_device *dev)
-{
-	unsigned int i;
-
-	printf("----------------------- KEY CODES ----------------------\n");
-	printf(" scancode                                  keycode\n");
-	for (i = 0; i < KEY_CNT; ++i)
-	{
-		struct input_keymap_entry km;
-		memset(&km, 0, sizeof(km));
-		km.len = 1;
-		km.scancode[0] = i;
-		km.keycode = i;
-		/* theres a _V2 for 256bit scancode, for ultra precision? */
-		if (ioctl(dev->fd, EVIOCGKEYCODE_V2, &km, 0)) {
-			printf("EVIOCGKEYCODE: %s\n", STRERR);
-			continue;
-		}
-			printf("%d                                     (%c)%d\n",
-							i, km.keycode, km.keycode);
-
-	}
-	printf("---------------------------------------------------------\n");
-
-	return 0;
-}
-#endif
-
-
-
-
 

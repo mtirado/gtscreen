@@ -1,6 +1,19 @@
-/* (c) 2016 Michael R. Tirado -- GPLv3, GNU General Public License version 3.
+/* Copyright (C) 2017 Michael R. Tirado <mtirado418@gmail.com> -- GPLv3+
+ *
+ * This program is libre software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details. You should have
+ * received a copy of the GNU General Public License version 3
+ * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  *
  */
+
 #define _GNU_SOURCE
 #include <malloc.h>
 #include <memory.h>
@@ -69,6 +82,14 @@ int craft_draw(struct craft *self)
 		      self->o.dyn->center.x,
 		      self->o.dyn->center.y,
 		      rotation);
+
+
+	self->main_thruster->center = self->o.dyn->center;
+	self->main_thruster->root_velocity = self->o.dyn->velocity;
+	self->main_thruster->color = self->argb;
+	emitter_update_draw(self->main_thruster);
+
+
 	draw_bitmap(g_screen,
 		    mesh,
 		    31,
@@ -82,20 +103,26 @@ void craft_roll(struct craft *self, float torque)
 {
 	struct vec2 force;
 	struct vec2 point;
+	if (self->rolling)
+		return;
 	point.x = 0.0f;
 	point.y = self->o.dyn->radius;
 	force.x = torque;
 	force.y = 0.0f;
 	dynamic_apply_torque(self->o.dyn, point, force);
+	self->rolling = 1;
 }
 
 void craft_thrust(struct craft *self, float force)
 {
 	struct vec2 impulse = self->o.dyn->up;
+	if (self->thrusting)
+		return;
 	impulse.x *= force;
 	impulse.y *= force;
 	dynamic_apply_impulse(self->o.dyn, impulse);
 	emitter_emit(self->main_thruster, 80);
+	self->thrusting = 1;
 }
 int craft_update(struct craft *self)
 {
@@ -103,16 +130,12 @@ int craft_update(struct craft *self)
 	ARGB_SETG(self->argb, ++g);
 	self->main_thruster->direction.x = self->o.dyn->up.x * -1.0f;
 	self->main_thruster->direction.y = self->o.dyn->up.y * -1.0f;
-
+	vec2_normalize(&self->main_thruster->direction);
 	/* debug center */
 	draw_pixel(g_screen, self->o.dyn->center.x,
 			self->o.dyn->center.y,
 			0xffffffff);
 
-	self->main_thruster->center = self->o.dyn->center;
-	self->main_thruster->root_velocity = self->o.dyn->velocity;
-	self->main_thruster->color = self->argb;
-	emitter_update(self->main_thruster);
 	return 0;
 }
 

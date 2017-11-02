@@ -1,11 +1,24 @@
-/* (c) 2016 Michael R. Tirado -- GPLv3, GNU General Public License version 3.
+/* Copyright (C) 2017 Michael R. Tirado <mtirado418@gmail.com> -- GPLv3+
+ *
+ * This program is libre software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details. You should have
+ * received a copy of the GNU General Public License version 3
+ * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  *
  */
 
 #define _GNU_SOURCE
-#include "../defines.h"
-#include "linux-vt.h"
-#include "linux-drm.h"
+#include "../../defines.h"
+#include "platform.h"
+#include "vt.h"
+#include "drm.h"
 #include <linux/vt.h>
 #include <signal.h>
 #include <string.h>
@@ -15,12 +28,10 @@
 #include <sys/ioctl.h>
 #include <termios.h>
 
-
-sig_atomic_t g_mute_input;
-sig_atomic_t g_unmute_input;
-
+extern sig_atomic_t g_input_muted;
+extern sig_atomic_t g_unmute_input;
+extern struct drm_kms *g_card0;
 #define STRERR strerror(errno)
-
 
 int g_kbmode;
 int g_ttyfd;
@@ -35,16 +46,16 @@ void vt_sig(int signum)
 		if (ioctl(g_ttyfd, VT_RELDISP, VT_ACKACQ) == -1) {
 			printf("ioctl(VT_RELDISP, VT_ACKACQ): %s\n", STRERR);
 		}
-		drm_acquire_signal();
+		drm_acquire_signal(g_card0);
 		g_unmute_input = 1;
 		break;
 	case SIGUSR2:
 		/* vt is switchign off */
-		drm_release_signal();
+		drm_release_signal(g_card0);
 		if (ioctl(g_ttyfd, VT_RELDISP, 1) == -1) {
 			printf("ioctl(VT_RELDISP, 1): %s\n", STRERR);
 		}
-		g_mute_input = 1;
+		g_input_muted = 1;
 		break;
 	default:
 		break;
@@ -76,7 +87,7 @@ static void vt_setmode_textauto()
 
 void vt_shutdown()
 {
-	g_mute_input = 1;
+	g_input_muted = 1;
 	if (ioctl(g_ttyfd, KDSKBMODE, g_kbmode) == -1)
 		printf("ioctl(KDSKBMODE, K_OFF): %s\n", STRERR);
 	vt_setmode_textauto();
@@ -89,7 +100,7 @@ int vt_init(int tty_fd, unsigned int kbd_mode)
 	struct vt_mode vtm;
 	struct termios tms;
 
-	g_mute_input = 1;
+	g_input_muted = 1;
 	g_unmute_input = 1; /* flush input */
 
 	g_ttyfd = tty_fd;

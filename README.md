@@ -1,2 +1,1 @@
-# gtscreen
-graphic type screen
+#TODO

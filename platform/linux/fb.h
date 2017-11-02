@@ -12,26 +12,17 @@
  * received a copy of the GNU General Public License version 3
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  *
- *
- * TODO currently only does 1 sprite per screen which is not very sprite-like :(
- * need to add the good stuff like sprite offsets, tiling, splits, resizing (at least
- * growing), all the basic window manager type features.
+ * TODO /dev/fb fallback support
  *
  */
-#ifndef SCREEN_H__
-#define SCREEN_H__
 
-#include "spr16.h"
+#ifndef LINUX_FB_H__
+#define LINUX_FB_H__
 
-struct screen {
-	struct screen *next;
-	struct client *clients; /* head is focused client */
-};
+#include "../../spr16.h"
+#include "platform.h"
 
-int screen_init(struct screen *self);
-int screen_add_client(struct screen *self, struct client *cl);
-struct client *screen_find_client(struct screen *self, int cl_fd);
-struct client *screen_remove_client(struct screen *self, int cl_fd);
-int screen_free(struct screen *self);
+int fb_drm_fd_callback(int fd, int event_flags, void *user_data);
+int fb_sync_client(struct server_context *self, struct client *cl);
 
 #endif

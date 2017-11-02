@@ -1,8 +1,31 @@
-/* (c) 2016 Michael R. Tirado -- GPLv3, GNU General Public License version 3.
+/* Copyright (C) 2017 Michael R. Tirado <mtirado418@gmail.com> -- GPLv3+
+ *
+ * This program is libre software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details. You should have
+ * received a copy of the GNU General Public License version 3
+ * along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ *
  *
  * common functions used by client and server
  *
+ * file descriptor transfer is a little tricky, they key to this is that
+ * recv buffers need to be completely clear before the fd is sent. we
+ * coordinate this by having the receiver clear their buffer, and then make
+ * the send request, so no normal messages are in flight when the fd is sent.
+ *
+ * NOTE: this only works during handshake period, before arbitrary messages
+ * start flying over the socket, i suppose this could be a future problem, but i
+ * don't think there is any good reason to be transfering fd's after handshake?
+ *
  */
+
 #define _GNU_SOURCE
 #include <errno.h>
 #include <string.h>
@@ -11,7 +34,7 @@
 #include <sys/uio.h>
 #include <sys/epoll.h>
 #include <sys/socket.h>
-#include "../protocol/spr16.h"
+#include "../../spr16.h"
 
 #define STRERR strerror(errno)
 
@@ -58,7 +81,6 @@ int spr16_write_msg(int fd, struct spr16_msghdr *hdr,
 {
 	char msg[SPR16_MAXMSGLEN];
 	unsigned int intr_count = 0;
-	hdr->bits = 0;
 	memcpy(msg, hdr, sizeof(*hdr));
 	memcpy(msg + sizeof(*hdr), msgdata, msgdata_len);
 interrupted:
@@ -150,6 +172,7 @@ char *spr16_read_msgs(int fd, uint32_t *outlen)
 		/* possibly truncated */
 		r = spr16_reassemble_fragment(fd);
 		if (r <= 0 ) {
+			printf("reassamble failed\n");
 			return NULL;
 		}
 	}
@@ -162,7 +185,7 @@ char *spr16_read_msgs(int fd, uint32_t *outlen)
 	return g_msgbuf;
 }
 
-int spr16_send_ack(int fd, uint16_t ack, uint16_t ackinfo)
+int spr16_send_ack(int fd, uint16_t ackinfo)
 {
 	struct spr16_msghdr hdr;
 	struct spr16_msgdata_ack data;
@@ -170,7 +193,7 @@ int spr16_send_ack(int fd, uint16_t ack, uint16_t ackinfo)
 	memset(&data, 0, sizeof(data));
 
 	hdr.type = SPRITEMSG_ACK;
-	data.ack = ack;
+	data.ack = 1;
 	data.info = ackinfo;
 	if (spr16_write_msg(fd, &hdr, &data, sizeof(data))) {
 		return -1;
@@ -178,93 +201,19 @@ int spr16_send_ack(int fd, uint16_t ack, uint16_t ackinfo)
 	return 0;
 }
 
-int spr16_dispatch_msgs(int fd, char *msgbuf, uint32_t buflen)
+int spr16_send_nack(int fd, uint16_t ackinfo)
 {
-	struct spr16_msghdr *msghdr;
-	char *msgpos, *msgdata;
-	int rdpos;
-	uint32_t typelen;
-	errno = 0;
-	rdpos = 0;
-	while (rdpos+sizeof(struct spr16_msghdr) < buflen)
-	{
-		msgpos  = msgbuf+rdpos;
-		msghdr  = (struct spr16_msghdr *)msgpos;
-		msgdata = msgpos+sizeof(struct spr16_msghdr);
-		typelen = get_msghdr_typelen(msghdr);
-		if (typelen > SPR16_MAXMSGLEN - sizeof(struct spr16_msghdr)
-				|| msgdata+typelen > msgbuf+buflen) {
-			errno = EPROTO;
-			return -1;
-		}
+	struct spr16_msghdr hdr;
+	struct spr16_msgdata_ack data;
+	memset(&hdr, 0, sizeof(hdr));
+	memset(&data, 0, sizeof(data));
 
-#ifdef SPR16_SERVER
-		switch (msghdr->type)
-		{
-		case SPRITEMSG_SERVINFO:
-			if (spr16_server_servinfo(fd)) {
-				fprintf(stderr, "servinfo failed\n");
-				return -1;
-			}
-			break;
-		case SPRITEMSG_REGISTER_SPRITE:
-			if (spr16_server_register_sprite(fd,
-					(struct spr16_msgdata_register_sprite *)
-					msgdata)) {
-				fprintf(stderr, "register failed\n");
-				return -1;
-			}
-			break;
-		case SPRITEMSG_SYNC:
-			if (spr16_server_sync((struct spr16_msgdata_sync *)msgdata)) {
-				fprintf(stderr, "sync failed\n");
-				return -1;
-			}
-			break;
-		default:
-			fprintf(stderr, "unknown msg type\n");
-			errno = EPROTO;
-			return -1;
-		}
-#else /* CLIENT */
-		(void)fd;
-		switch (msghdr->type)
-		{
-		case SPRITEMSG_SERVINFO:
-			if (spr16_client_servinfo(
-					(struct spr16_msgdata_servinfo *)msgdata)) {
-				fprintf(stderr, "servinfo failed\n");
-				return -1;
-			}
-			break;
-		case SPRITEMSG_ACK:
-			if (spr16_client_ack((struct spr16_msgdata_ack *)msgdata)) {
-				fprintf(stderr, "ack failed\n");
-				return -1;
-			}
-			break;
-		case SPRITEMSG_INPUT:
-			if (spr16_client_input((struct spr16_msgdata_input *)msgdata)) {
-				fprintf(stderr, "input failed\n");
-				return -1;
-			}
-			break;
-		case SPRITEMSG_INPUT_SURFACE:
-			if (spr16_client_input_surface(
-						(struct spr16_msgdata_input_surface *)
-						msgdata)) {
-				fprintf(stderr, "input_surface failed\n");
-				return -1;
-			}
-			break;
-		default:
-			errno = EPROTO;
-			return -1;
-		}
-#endif
-		rdpos += sizeof(struct spr16_msghdr) + typelen;
+	hdr.type = SPRITEMSG_ACK;
+	data.ack = 0;
+	data.info = ackinfo;
+	if (spr16_write_msg(fd, &hdr, &data, sizeof(data))) {
+		return -1;
 	}
-
 	return 0;
 }
 
@@ -279,7 +228,8 @@ int afunix_send_fd(int sock, int fd)
 	struct iovec iov;
 	int  retval;
 	char data = 'F';
-	int  i;
+	int  c = 5000;
+	int *fdp;
 
 	if (sock == -1 || fd == -1) {
 		fprintf(stderr, "invalid descriptor\n");
@@ -301,8 +251,9 @@ int afunix_send_fd(int sock, int fd)
 	cmhp->cmsg_len = CMSG_LEN(sizeof(int));
 	cmhp->cmsg_level = SOL_SOCKET;
 	cmhp->cmsg_type = SCM_RIGHTS;
-	*((int *)CMSG_DATA(cmhp)) = fd;
-	for (i = 0; i < 1000; ++i) {
+	fdp = ((int *)CMSG_DATA(cmhp));
+	*fdp = fd;
+	while (--c > 0) {
 		retval = sendmsg(sock, &msgh, MSG_DONTWAIT);
 		if (retval == -1 && errno == EINTR) {
 			continue;
@@ -310,6 +261,10 @@ int afunix_send_fd(int sock, int fd)
 		else {
 			break;
 		}
+	}
+	if (c <= 0) {
+		printf("sendmsg timed out\n");
+		return -1;
 	}
 
 	if (retval != (int)iov.iov_len){
@@ -323,8 +278,6 @@ int afunix_send_fd(int sock, int fd)
 	return 0;
 }
 
-
-
 int afunix_recv_fd(int sock, int *fd_out)
 {
 	union {
@@ -336,6 +289,7 @@ int afunix_recv_fd(int sock, int *fd_out)
 	struct iovec iov;
 	char data;
 	int fd;
+	int *fdp;
 	int retval;
 
 	errno = 0;
@@ -387,7 +341,10 @@ int afunix_recv_fd(int sock, int *fd_out)
 		return -1;
 	}
 
-	fd = *((int *) CMSG_DATA(cmhp));
+	fdp = ((int *) CMSG_DATA(cmhp));
+
+	fd = *fdp;
+
 	if (data != 'F') {
 		fprintf(stderr, "received an improper file, closing.\n");
 		close(fd);
@@ -396,6 +353,3 @@ int afunix_recv_fd(int sock, int *fd_out)
 	*fd_out = fd;
 	return 0;
 }
-
-
-

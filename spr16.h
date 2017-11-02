@@ -1,4 +1,17 @@
-/* (c) 2016 Michael R. Tirado -- GPLv3, GNU General Public License version 3.
+/* Copyright (C) 2017 Michael R. Tirado <mtirado418@gmail.com> -- GPLv3+
+ *
+ * This program is libre software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details. You should have
+ * received a copy of the GNU General Public License version 3
+ * along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ *
  *
  */
 
@@ -7,32 +20,23 @@
 
 #include <stdint.h>
 #include <stddef.h>
+#include "screen.h"
 /*
- * This is a suuuuper simple display protocol.
- * buffer id=0 should be invalid,
- *
- * one client = one shared mem region, that's it!
+ * currently, one client = one shared mem region
  * memory is mapped as part of connection handshake.
- * resizing is not supported.
+ * resizing is not supported yet.
  *
- * TODO currently it assumes 32bpp ARGB
+ * for now, registered buffers cannot be resized, a pain-free implementation
+ * of resizing would assume every resizable client just has full screen size
  *
- * for simplicity sake, registered buffers cannot be shrunk or increased.
- * this may be possible eventually but would require a buffer remap, or sync
- * over pipes instead of shmem. there may be platform specific options to
- * improve this, but i have not gone through DRM thoroughly enough to get
- * a clear picture of how the protocol would look while still supporting
- * complete software-only operation, so this protocol is obviously
- * not set in stone..
- *
- * this is not suitible for networked usage, due to the nature of
+ * this is not suitible for networked usage as-is, due to the nature of
  * struct padding on various architectures. you would want to add some sync
  * compression in addition to proper serialization if taking that route.
- * NOTE: all structs must be evenly sized / divide evenly by 2, unless you
- * want to handle adding a triple read if msg truncates with 1 byte fragment
- * for some crazy reason, i don't know if all arch's are safe from this?
+ *
+ * NOTE: all structs must be evenly sized / divide evenly by 2
+ * FIXME currently only supports 32bpp ARGB
+ * TODO set sticky bit and check that, + perms on socket
  */
-
 
 #define SPR16_MAXMSGLEN 64 /* hdr+data */
 #define SPR16_MAXNAME   32
@@ -41,7 +45,7 @@
 #define SPR16_ACK  1
 #define SPR16_NACK 0
 #define SPR16_MAXCLIENTS 128
-
+#define SPR16_DMG_SLOTS 32
 
 /* added precision for acceleration curve, 1 hardware unit == 10 spr16
  * don't change this, it should be safe to assume this is universally 10
@@ -49,22 +53,7 @@
 #define SPR16_RELATIVE_SCALE 10
 
 
-/* TODO set sticky bit and check that, + perms like xephyr does ;)
- *
- * */
 
-
-/* ack info */
-enum {
-	SPRITEACK_SEND_DESCRIPTOR=1,
-	SPRITEACK_ESTABLISHED,
-	SPRITENACK_SIZE, /* size might need to be padded beyond w*h*bpp */
-	SPRITENACK_WIDTH,
-	SPRITENACK_HEIGHT,
-	SPRITENACK_BPP,
-	SPRITENACK_SHMEM,
-	SPRITENACK_DISCONNECT
-};
 
 /* msg types
  *
@@ -74,22 +63,41 @@ enum {
  * ACK             - ACK or NACK message.
  * SYNC            - Sync modified sprite region.
  * INPUT           - Send input event to client.
- *
- * */
+ */
 enum {
 	SPRITEMSG_SERVINFO=100,
 	SPRITEMSG_REGISTER_SPRITE,
+	SPRITEMSG_RECV_FD,
+	SPRITEMSG_SEND_FD,
 	SPRITEMSG_ACK,
 	SPRITEMSG_SYNC,
 	SPRITEMSG_INPUT,
 	SPRITEMSG_INPUT_SURFACE
 };
 
-/* bit flags
- * TODO so clients don't have to keep rendering if invisible
+/* ack info
+ *
+ * RECV_FD	   - Tell receiver to prepare for receiving an fd, we set a flag
+ *                   immediately after this message is sent so no other messages
+ *                   should be exchanged until client responds with SEND_FD.
+ * SEND_FD	   - Response for RECV_FD, notifies sender we cleared the message
+ * 		     buffer and are ready for the file now. there is no message
+ * 		     for the fd itself, just a single byte 'F' with ancillary data
  */
-#define SPRITE_FLAG_VISIBLE  0x01
-#define SPRITE_FLAG_INVERT_Y 0x02
+enum {
+	SPRITEACK_ESTABLISHED=1,
+	SPRITEACK_SYNC_VSYNC,
+	SPRITEACK_SYNC_PAGEFLIP,
+	SPRITEACK_RECV_FD,
+	SPRITEACK_SEND_FD,
+	SPRITENACK_SIZE, /* size might need to be padded beyond w*h*bpp */
+	SPRITENACK_WIDTH,
+	SPRITENACK_HEIGHT,
+	SPRITENACK_BPP,
+	SPRITENACK_SHMEM,
+	SPRITENACK_FD,
+	SPRITENACK_DISCONNECT
+};
 
 struct spr16_shmem {
 	char *addr;
@@ -97,6 +105,7 @@ struct spr16_shmem {
 	uint32_t size;
 };
 
+#define SPRITE_FLAG_DIRECT_SHM 0x0001 /* client renders directly to sprite */
 /* sprite object */
 struct spr16 {
 	char name[SPR16_MAXNAME];
@@ -110,6 +119,13 @@ struct spr16 {
 	uint16_t bpp;
 };
 
+/* msghdr bit flags/values */
+#define SPRITESYNC_FLAG_ASYNC          0x0001
+#define SPRITESYNC_FLAG_VBLANK         0x0002
+#define SPRITESYNC_FLAG_PAGE_FLIP      0x0004 /* TODO */
+#define SPRITESYNC_FLAG_MASK (	SPRITESYNC_FLAG_ASYNC     | \
+				SPRITESYNC_FLAG_VBLANK    | \
+				SPRITESYNC_FLAG_PAGE_FLIP )
 /*
  * the msghdr is immediately followed by specific msgdata struct
  * these two structs should be written in the same write call
@@ -137,7 +153,6 @@ struct spr16_msgdata_register_sprite {
 	uint16_t width;
 	uint16_t height;
 	uint16_t bpp;
-	/* TODO surface formats, just using drm default 32bit ARGB */
 };
 
 /* can be ack or nack, with some info */
@@ -148,14 +163,17 @@ struct spr16_msgdata_ack {
 
 /* client requesting synchronization */
 struct spr16_msgdata_sync {
-	uint16_t x;
+	uint16_t xmin;
+	uint16_t ymin;
+	uint16_t xmax;
+	uint16_t ymax;
+	/*uint16_t x;
 	uint16_t y;
 	uint16_t width;
-	uint16_t height;
+	uint16_t height;*/
 };
 
 /*
- * TODO stop using evdev code defines.
  * type values:
  *      key      - code=key  val=state
  * 	absolute - code=axis val=pos   ext=max
@@ -178,24 +196,25 @@ struct spr16_msgdata_input_surface {
 };
 
 enum {
-	SPR16_INPUT_KEY = 1,   /* full spr16 keycodes */
-	SPR16_INPUT_KEY_ASCII, /* fallback ascii mapped keycodes */
+	SPR16_INPUT_CONTROL = 1,   /* control codes */
+	SPR16_INPUT_KEY,       /* full spr16 keycodes */
+	SPR16_INPUT_KEY_ASCII,
 	SPR16_INPUT_AXIS_RELATIVE,
 	SPR16_INPUT_AXIS_ABSOLUTE,
 	SPR16_INPUT_SURFACE
 };
 
 #define SPR16_SURFACE_MAX_CONTACTS 64
-
-
-
-/* TODO some vt switch other than linux kernel vt keyboard */
-#define SPR16_KEYMOD_LALT  0x00000001
-#define SPR16_KEYMOD_LCTRL 0x00000002
+enum {
+	SPR16_CTRLCODE_RESET = 0 /* clients that track input state should reset */
+};
 
 enum {
+	/* 0-255 */
 	SPR16_KEYCODE_ESCAPE = 27,
-	SPR16_KEYCODE_LSHIFT = 0x0100, /* beginning of non-ascii values */
+	/* beginning of non-ascii values, everything above here is just normal
+	 * ascii codes, add defines as needed like already done with escape. */
+	SPR16_KEYCODE_LSHIFT = 0x0100,
 	SPR16_KEYCODE_RSHIFT,
 	SPR16_KEYCODE_LCTRL,
 	SPR16_KEYCODE_RCTRL,
@@ -253,16 +272,17 @@ enum {
 	SPR16_KEYCODE_F22,
 	SPR16_KEYCODE_F23,
 	SPR16_KEYCODE_F24,
-	SPR16_KEYCODE_LBTN,
-	SPR16_KEYCODE_RBTN,
 	SPR16_KEYCODE_ABTN,
 	SPR16_KEYCODE_BBTN,
 	SPR16_KEYCODE_CBTN,
 	SPR16_KEYCODE_DBTN,
 	SPR16_KEYCODE_EBTN,
 	SPR16_KEYCODE_FBTN,
+	SPR16_KEYCODE_LBTN,
+	SPR16_KEYCODE_RBTN,
 	SPR16_KEYCODE_SBTN,
-	SPR16_KEYCODE_CONTACT
+	SPR16_KEYCODE_CONTACT, /* surface contact */
+	SPR16_KEYCODE_COUNT
 };
 
 typedef int (*input_handler)(struct spr16_msgdata_input *input);
@@ -272,11 +292,13 @@ typedef int (*servinfo_handler)(struct spr16_msgdata_servinfo *sinfo);
 /*----------------------------------------------*
  * message handling                             *
  *----------------------------------------------*/
+struct client;
+uint32_t get_msghdr_typelen(struct spr16_msghdr *hdr);
+struct spr16_msgdata_servinfo *spr16_get_servinfo_msg(int fd, uint32_t *outlen, int timeout);
 char *spr16_read_msgs(int fd, uint32_t *outlen);
-int spr16_dispatch_msgs(int fd, char *msgbuf, uint32_t buflen);
-int spr16_write_msg(int fd, struct spr16_msghdr *hdr,
-                    void *msgdata, size_t msgdata_len);
-int spr16_send_ack(int fd, uint16_t ack, uint16_t ackinfo);
+int spr16_write_msg(int fd, struct spr16_msghdr *hdr, void *msgdata, size_t msgdata_len);
+int spr16_send_ack(int fd, uint16_t ackinfo);
+int spr16_send_nack(int fd, uint16_t ackinfo);
 int afunix_send_fd(int sock, int fd);
 int afunix_recv_fd(int sock, int *fd_out);
 
@@ -289,7 +311,6 @@ int spr16_client_connect(char *name);
 int spr16_client_handshake_start(char *name, uint16_t width, uint16_t height, uint32_t flags);
 int spr16_client_handshake_wait(uint32_t timeout);
 int spr16_client_servinfo(struct spr16_msgdata_servinfo *sinfo);
-/* TODO pixel formats */
 int spr16_client_register_sprite(char *name, uint16_t width, uint16_t height, uint32_t flags);
 int spr16_client_update(int poll_timeout); /* timeout in milliseconds, <0 blocks */
 int spr16_client_shutdown();
@@ -297,7 +318,9 @@ struct spr16_msgdata_servinfo *spr16_client_get_servinfo();
 int spr16_client_ack(struct spr16_msgdata_ack *ack);
 struct spr16 *spr16_client_get_sprite();
 /* may return -1 with errno set to EAGAIN, if server buffer is full */
-int spr16_client_sync(uint16_t x, uint16_t y, uint16_t width, uint16_t height);
+int spr16_client_sync(uint16_t xmin, uint16_t ymin,
+		      uint16_t xmax, uint16_t ymax, uint16_t flags);
+int spr16_client_waiting_for_vsync();
 int spr16_client_input(struct spr16_msgdata_input *msg);
 int spr16_client_input_surface(struct spr16_msgdata_input_surface *msg);
 int spr16_client_set_servinfo_handler(servinfo_handler func);
@@ -310,7 +333,17 @@ int spr16_client_set_input_surface_handler(input_surface_handler func);
 /*----------------------------------------------*
  * server side                                  *
  *----------------------------------------------*/
-struct server
+struct spr16_framebuffer
+{
+	char    *addr;
+	size_t   size;
+	uint16_t width;
+	uint16_t height;
+	uint16_t bpp;
+	/*uint16_t depth;*/
+};
+
+struct server_options
 {
 	/* TODO sweep up common global clutter here */
 	uint16_t request_width;
@@ -319,26 +352,35 @@ struct server
 	int pointer_accel;
 	int vscroll_amount;
 };
+
 struct client
 {
 	struct spr16 sprite;
+	struct spr16_msgdata_sync dmg[SPR16_DMG_SLOTS];
 	struct client *next;
+	uint16_t dmg_count;
+	uint32_t sync_flags;
+	int syncing;
 	int handshaking;
 	int connected; /* set nonzero after handshake */
+	int recv_fd_wait;
 	int socket;
 };
-int spr16_server_init(uint16_t width, uint16_t height, uint16_t bpp);
-int spr16_server_servinfo(int fd);
-int spr16_server_sync(struct spr16_msgdata_sync *region);
-int spr16_server_register_sprite(int fd, struct spr16_msgdata_register_sprite *reg);
-int spr16_server_update();
-int spr16_open_memfd(struct spr16_msgdata_register_sprite *reg);
-int spr16_server_init_input();
-int spr16_server_shutdown(int listen_fd);
 
+/* TODO move this into framebuffer struct */
+int  spr16_server_is_active();
+void spr16_server_activate();
+void spr16_server_deactivate();
+
+/*int  spr16_server_servinfo(int fd);
+int  spr16_server_sync(struct client *cl, uint16_t flags, struct spr16_msgdata_sync *region);
+int  spr16_server_register_sprite(int fd, struct spr16_msgdata_register_sprite *reg);
+int  spr16_open_memfd(struct spr16_msgdata_register_sprite *reg);
+*/
 
 
 /*
+ * FIXME -- this has changed
  * Simple usage scenario:
  *
  * client                              server
@@ -356,34 +398,38 @@ int spr16_server_shutdown(int listen_fd);
  */
 
 
+
 /*----------------------------------------------*
  * input drivers                                *
  *----------------------------------------------*/
+
+/* number of longs needed to represent n bits. */
+#define LONG_BITS (sizeof(long) * 8)
+#define NLONGS(n) ((n+LONG_BITS-1)/LONG_BITS)
+
 /* server callback for hotkey events */
 struct input_device;
 enum {
-	SPR16_HOTKEY_NEXTSCREEN = 1,
+	SPR16_HOTKEY_AXE = 1,
+	SPR16_HOTKEY_NEXTSCREEN,
 	SPR16_HOTKEY_PREVSCREEN
 };
 typedef int (*input_hotkey)(uint32_t hk, void *v);
 typedef int (*input_transceive)(struct input_device *self, int client);
 typedef int (*input_flush)(struct input_device *self);
 struct input_device {
+	unsigned long btn_down[NLONGS(SPR16_KEYCODE_COUNT)];
 	char path[128];
 	char name[64];
 	input_flush func_flush;
-	input_transceive func_transceive;
 	input_hotkey func_hotkey;
+	/*input_transceive func_transceive;*/
 	void *private; /* first variable always uint32_t type */
+	void *srv_ctx; /* server context for callbacks */
 	struct input_device *next;
 	uint32_t keyflags;
 	uint8_t device_id;
 	int fd;
 };
 
-struct screen {
-	struct screen *next;
-	struct client *clients;
-	struct client *focused_client;
-};
 #endif
