@@ -669,6 +669,7 @@ free_err:
 }
 
 struct drm_kms *drm_mode_create(char *devname,
+				int no_connect,
 				uint16_t req_width,
 				uint16_t req_height,
 				uint16_t req_refresh)
@@ -721,7 +722,7 @@ struct drm_kms *drm_mode_create(char *devname,
 		goto free_err;
 	}
 
-	if (drm_kms_connect_sfb(self)) {
+	if (!no_connect && drm_kms_connect_sfb(self)) {
 		printf("drm_kms_connect_sfb failed\n");
 		goto free_err;
 	}

@@ -58,6 +58,7 @@ struct drm_kms
 
 
 struct drm_kms *drm_mode_create(char *devname,
+				int no_connect,
 				uint16_t req_width,
 				uint16_t req_height,
 				uint16_t req_refresh);

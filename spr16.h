@@ -351,6 +351,7 @@ struct server_options
 	uint16_t request_refresh;
 	int pointer_accel;
 	int vscroll_amount;
+	int inactive_vt;
 };
 
 struct client

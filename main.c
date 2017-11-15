@@ -136,8 +136,6 @@ int read_environ(struct server_options *srv_opts)
 	uint16_t req_height    = 0;
 	uint16_t req_refresh   = 60;
 
-	memset(srv_opts, 0, sizeof(struct server_options));
-
 	estr = getenv("SPR16_VSCROLL_AMOUNT");
 	if (estr != NULL) {
 		errno = 0;
@@ -208,6 +206,7 @@ static void print_usage()
 	printf("\n");
 	printf("[arguments]\n");
 	printf("    --printmodes    print all connectors and modes\n");
+	printf("    --inactive-vt   vt is not the current tty\n");
 	printf("\n");
 	printf("[environment variables]\n");
 	printf("    SPR16_SCREEN_WIDTH        preferred screen width\n");
@@ -219,7 +218,7 @@ static void print_usage()
 	printf("\n");
 }
 
-int read_args(int argc, char *argv[])
+int read_args(int argc, char *argv[], struct server_options *srv_opts)
 {
 	int i;
 	if (argc <= 1)
@@ -231,6 +230,9 @@ int read_args(int argc, char *argv[])
 			drm_kms_print_modes("/dev/dri/card0");
 			_exit(0);
 			return -1;
+		}
+		else if (strncmp("--inactive-vt", argv[i], 14) == 0) {
+			srv_opts->inactive_vt = 1;
 		}
 		else {
 			print_usage();
@@ -254,7 +256,7 @@ int main(int argc, char *argv[])
 
 	if (read_environ(&g_srv_opts))
 		return -1;
-	if (read_args(argc, argv))
+	if (read_args(argc, argv, &g_srv_opts))
 		return -1;
 
 	fdpoll = fdpoll_handler_create(MAX_FDPOLL_HANDLER, 1);
@@ -264,7 +266,8 @@ int main(int argc, char *argv[])
 	}
 
 	/* card0 must be set before any SIGUSR1/2's might be sent! */
-	g_card0 = drm_mode_create("card0", g_srv_opts.request_width,
+	g_card0 = drm_mode_create("card0", g_srv_opts.inactive_vt,
+					   g_srv_opts.request_width,
 					   g_srv_opts.request_height,
 					   g_srv_opts.request_refresh);
 	if (g_card0 == NULL) {
