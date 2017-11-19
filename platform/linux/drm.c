@@ -149,6 +149,7 @@ free_err:
 
 int print_mode_card_resources(struct drm_mode_card_res *res)
 {
+	unsigned int i;
 	if (!res)
 		return -1;
 
@@ -156,11 +157,29 @@ int print_mode_card_resources(struct drm_mode_card_res *res)
 	printf("min_height:       %d\n", res->min_height);
 	printf("max_width:        %d\n", res->max_width);
 	printf("max_height:       %d\n", res->max_height);
-	printf("count_fbs:        %d\n", res->count_fbs);
-	printf("count_crtcs:      %d\n", res->count_crtcs);
-	printf("count_encoders:   %d\n", res->count_encoders);
-	printf("count_connectors: %d\n", res->count_connectors);
 
+	printf("count_fbs:        %d\n", res->count_fbs);
+	for (i = 0; i < res->count_fbs; ++i) {
+		printf("    crtc[%d]: %d\n", i,
+				((uint32_t *)drm_to_ptr(res->fb_id_ptr))[i]);
+	}
+	printf("count_crtcs:      %d\n", res->count_crtcs);
+	for (i = 0; i < res->count_crtcs; ++i) {
+		printf("    crtc[%d]: %d\n", i,
+				((uint32_t *)drm_to_ptr(res->crtc_id_ptr))[i]);
+	}
+
+	printf("count_connectors: %d\n", res->count_connectors);
+	for (i = 0; i < res->count_connectors; ++i) {
+		printf("    connector[%d]: %d\n", i,
+				((uint32_t *)drm_to_ptr(res->connector_id_ptr))[i]);
+	}
+
+	printf("count_encoders:   %d\n", res->count_encoders);
+	for (i = 0; i < res->count_encoders; ++i) {
+		printf("    encoder[%d]: %d\n", i,
+				((uint32_t *)drm_to_ptr(res->encoder_id_ptr))[i]);
+	}
 	return 0;
 }
 
@@ -391,13 +410,23 @@ static int drm_kms_connect_sfb(struct drm_kms *self)
 	 */
 
 	/* XXX: there can be multiple encoders, have not investigated this much */
+	if (conn->encoder_id == 0) {
+		printf("conn->encoder_id was 0, defaulting to encoder[0]\n");
+		conn->encoder_id = ((uint32_t *)drm_to_ptr(conn->encoders_ptr))[0];
+	}
 	encoder->encoder_id = conn->encoder_id;
+
 	if (ioctl(self->card_fd, DRM_IOCTL_MODE_GETENCODER, encoder) == -1) {
 		printf("ioctl(DRM_IOCTL_MODE_GETENCODER): %s\n", STRERR);
 		return -1;
 	}
 
+	if (encoder->crtc_id == 0) {
+		printf("encoder->crtc_id was 0, defaulting to crtc[0]\n");
+		encoder->crtc_id = ((uint32_t *)drm_to_ptr(self->res->crtc_id_ptr))[0];
+	}
 	crtc->crtc_id = encoder->crtc_id;
+
 	if (ioctl(self->card_fd, DRM_IOCTL_MODE_GETCRTC, crtc) == -1) {
 		printf("ioctl(DRM_IOCTL_MODE_GETCRTC): %s\n", STRERR);
 		return -1;
