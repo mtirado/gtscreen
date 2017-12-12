@@ -547,49 +547,53 @@ static int open_log(char *socketname)
 	return 0;
 }
 
-static int server_create_socket(struct server_context *self)
+static int server_create_socket(struct server_context *self, char *sockname)
 {
 	int sock;
 	struct sockaddr_un addr;
+
 	memset(&addr, 0, sizeof(addr));
 
-	/* TODO detect current vt*/
-	if (open_log("tty1"))
+	addr.sun_family = AF_UNIX;
+	if (snprintf(addr.sun_path, sizeof(addr.sun_path), "%s/%s",
+				SPR16_SOCKPATH, sockname) >= (int)sizeof(addr.sun_path))
 		return -1;
 
-	addr.sun_family = AF_UNIX;
-	snprintf(addr.sun_path, sizeof(addr.sun_path), "%s/tty1", SPR16_SOCKPATH);
-	/* TODO check perms sticky bit on dir, etc */
 	sock = socket(AF_UNIX, SOCK_STREAM|SOCK_CLOEXEC|SOCK_NONBLOCK, 0);
 	if (sock == -1) {
 		printf("socket: %s\n", STRERR);
 		return -1;
 	}
-	unlink(addr.sun_path);
+
 	if (bind(sock, (struct sockaddr *)&addr, sizeof(addr))) {
+		printf("    >>  socket already exists: %s  <<    \n", addr.sun_path);
 		printf("bind: %s\n", STRERR);
 		close(sock);
 		return -1;
 	}
-	/* TODO set the group and remove other permission */
-	chmod(addr.sun_path, 0777);
+
+	chmod(addr.sun_path, 0770);
 	if (listen(sock, MAX_ACCEPT)) {
 		printf("listen: %s\n", STRERR);
 		close(sock);
 		return -1;
 	}
 
-	printf("add listener ----------\n");
 	if (fdpoll_handler_add(self->fdpoll, sock, FDPOLLIN, listener_callback, self)) {
 		printf("fdpoll_handler_add(%d) failed\n", sock);
 		close(sock);
 		return -1;
 	}
 
+	if (open_log(sockname))
+		return -1;
+
 	return sock;
 }
 
-struct server_context *spr16_server_init(struct fdpoll_handler *fdpoll, struct spr16_framebuffer *fb)
+struct server_context *spr16_server_init(char *sockname,
+					 struct fdpoll_handler *fdpoll,
+					 struct spr16_framebuffer *fb)
 {
 	struct server_context *self = calloc(1, sizeof(struct server_context));
 	if (self == NULL)
@@ -600,7 +604,7 @@ struct server_context *spr16_server_init(struct fdpoll_handler *fdpoll, struct s
 	self->pending_clients = NULL;
 	self->free_count = 0;
 	self->fdpoll = fdpoll;
-	self->listen_fd = server_create_socket(self);
+	self->listen_fd = server_create_socket(self, sockname);
 	self->card0 = g_card0;
 	if (self->listen_fd == -1) {
 		free(self);

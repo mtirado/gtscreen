@@ -40,6 +40,7 @@
 
 #define SPR16_MAXMSGLEN 64 /* hdr+data */
 #define SPR16_MAXNAME   32
+#define SPR16_MAX_SOCKNAME 128
 #define SPR16_SOCKPATH "/tmp/spr16"
 #define SPR16_LOGPATH "/usr/var/log/spr16"
 #define SPR16_ACK  1
@@ -346,6 +347,7 @@ struct spr16_framebuffer
 struct server_options
 {
 	/* TODO sweep up common global clutter here */
+	char socket_name[SPR16_MAX_SOCKNAME];
 	uint16_t request_width;
 	uint16_t request_height;
 	uint16_t request_refresh;

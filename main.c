@@ -39,9 +39,21 @@
 #include "platform/linux/fb.h"
 #define STRERR strerror(errno)
 
+sig_atomic_t g_initialized;
 sig_atomic_t g_running;
 struct server_options g_srv_opts;
 struct drm_kms *g_card0;
+
+void exit_func()
+{
+	if (g_initialized) {
+		char sockpath[MAX_SYSTEMPATH];
+		snprintf(sockpath, MAX_SYSTEMPATH, "%s/%s",
+				SPR16_SOCKPATH, g_srv_opts.socket_name);
+		unlink(sockpath);
+	}
+	vt_shutdown();
+}
 
 /* reset on fatal signals, sigkill screws us up still :( */
 void sig_func(int signum)
@@ -55,9 +67,8 @@ void sig_func(int signum)
 		g_running = 0;
 		return;
 	default:
-		vt_shutdown();
 		printf("killed by signal(%d): %s\n", signum, strsignal(signum));
-		_exit(-1);
+		exit(-1);
 	}
 }
 
@@ -94,16 +105,16 @@ int server_main(struct fdpoll_handler *fdpoll, struct drm_kms *card)
 	/*K_XLATE, or K_MEDIUMRAW for keycodes, RAW is 8 bits*/
 	if (vt_init(0, K_XLATE))
 		return -1;
-	if (atexit(vt_shutdown))
+	if (atexit(exit_func))
 		return -1;
 	sig_setup();
 
-	ctx = spr16_server_init(fdpoll, &fb);
+	ctx = spr16_server_init(g_srv_opts.socket_name, fdpoll, &fb);
 	if (ctx == NULL) {
 		printf("server init failed\n");
 		return -1;
 	}
-
+	g_initialized = 1;
 	/* for vblank handler, and future pageflipping */
 	if (fdpoll_handler_add(fdpoll, card->card_fd, FDPOLLIN, fb_drm_fd_callback, ctx)){
 		printf("fdpoll_handler_add(%d) failed\n", card->card_fd);
@@ -199,14 +210,44 @@ int read_environ(struct server_options *srv_opts)
 }
 
 
+static int read_socket_name(struct server_options *srv_opts, char *arg)
+{
+	unsigned int i;
+	size_t len = snprintf(srv_opts->socket_name, SPR16_MAX_SOCKNAME, "%s", arg);
+	if (len == 0 || len  >= SPR16_MAX_SOCKNAME) {
+		printf("bad socket name\n");
+		goto failed;
+	}
+
+	for (i = 0; i < len; ++i)
+	{
+		char c = srv_opts->socket_name[i];
+		if (c <= 32 || c >= 127) {
+			printf("invalid character in socket name\n");
+			goto failed;
+		}
+		else if (c == '/' || c == '.') {
+			printf(" / or . found in socket name\n");
+			goto failed;
+		}
+	}
+	return 0;
+failed:
+	memset(srv_opts->socket_name, 0, SPR16_MAX_SOCKNAME);
+	return -1;
+}
+
 static void print_usage()
 {
 	printf("\n");
-	printf("usage: gtscreen <arguments>\n");
+	printf("usage: gtscreen <socket_name> <arguments>\n");
+	printf("\n");
+	printf("[socket_name]\n");
+	printf("    file name located in /tmp/spr16/\n");
 	printf("\n");
 	printf("[arguments]\n");
-	printf("    --printmodes    print all connectors and modes\n");
-	printf("    --inactive-vt   vt is not the current tty\n");
+	printf("    --printmodes  print all connectors and modes\n");
+	printf("    --inactive-vt vt is not active tty, don't take over framebuffer\n");
 	printf("\n");
 	printf("[environment variables]\n");
 	printf("    SPR16_SCREEN_WIDTH        preferred screen width\n");
@@ -221,17 +262,24 @@ static void print_usage()
 int read_args(int argc, char *argv[], struct server_options *srv_opts)
 {
 	int i;
-	if (argc <= 1)
-		return 0;
-	for (i = 1; i < argc; ++i)
+	if (argc <= 1) {
+		print_usage();
+		printf("\n\nmissing first argument, socket name.\n");
+		return -1;
+	}
+
+	if (strncmp("--printmodes", argv[1], 13) == 0) {
+		drm_kms_print_modes("/dev/dri/card0"); /* FIXME card as argument */
+		return -1;
+	}
+
+	/* socket_name is mandatory first argument */
+	if (read_socket_name(srv_opts, argv[1]))
+		return -1;
+
+	for (i = 2; i < argc; ++i)
 	{
-		if (strncmp("--printmodes", argv[i], 13) == 0) {
-			/* FIXME */
-			drm_kms_print_modes("/dev/dri/card0");
-			_exit(0);
-			return -1;
-		}
-		else if (strncmp("--inactive-vt", argv[i], 14) == 0) {
+		if (strncmp("--inactive-vt", argv[i], 14) == 0) {
 			srv_opts->inactive_vt = 1;
 		}
 		else {
@@ -248,6 +296,8 @@ int main(int argc, char *argv[])
 	int ret = -1;
 
 	g_running = 1;
+	g_initialized = 0;
+
 	memset(&g_srv_opts, 0, sizeof(struct server_options));
 
 	/* line buffer output */

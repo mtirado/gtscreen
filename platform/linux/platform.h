@@ -45,7 +45,8 @@ struct server_context {
 	struct drm_kms *card0;
 };
 
-struct server_context *spr16_server_init(struct fdpoll_handler *fdpoll,
+struct server_context *spr16_server_init(char *sockname,
+					 struct fdpoll_handler *fdpoll,
 					 struct spr16_framebuffer *fb);
 int spr16_server_update(struct server_context *self);
 int spr16_server_shutdown(struct server_context *self);
