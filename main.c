@@ -266,7 +266,7 @@ int read_args(int argc, char *argv[], struct server_options *srv_opts)
 	if (argc <= 1)
 		return 0;
 
-	for (i = 2; i < argc; ++i)
+	for (i = 1; i < argc; ++i)
 	{
 		if (strncmp("--printmodes", argv[i], 13) == 0) {
 			drm_kms_print_modes("/dev/dri/card0"); /* TODO card arg/env */
