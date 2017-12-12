@@ -137,6 +137,30 @@ err:
 	return -1;
 }
 
+static int read_socket_name(struct server_options *srv_opts, char *name)
+{
+	unsigned int i;
+	size_t len = snprintf(srv_opts->socket_name, SPR16_MAX_SOCKET, "%s", name);
+	if (len == 0 || len  >= SPR16_MAX_SOCKET) {
+		printf("bad socket name\n");
+		return -1;
+	}
+
+	for (i = 0; i < len; ++i)
+	{
+		char c = srv_opts->socket_name[i];
+		if (c <= 32 || c >= 127) {
+			printf("invalid character in socket name\n");
+			return -1;
+		}
+		else if (c == '/' || c == '.') {
+			printf(" / or . found in socket name\n");
+			return -1;
+		}
+	}
+	return 0;
+}
+
 int read_environ(struct server_options *srv_opts)
 {
 	char *estr = NULL;
@@ -201,6 +225,13 @@ int read_environ(struct server_options *srv_opts)
 				return -1;
 		}
 	}
+
+	estr = getenv("SPR16_SOCKET");
+	if (estr == NULL)
+		estr = SPR16_DEFAULT_SOCKET;
+	if (read_socket_name(srv_opts, estr))
+		return -1;
+
 	srv_opts->pointer_accel   = pointer_accel;
 	srv_opts->vscroll_amount  = vscroll_amount;
 	srv_opts->request_width   = req_width;
@@ -209,47 +240,17 @@ int read_environ(struct server_options *srv_opts)
 	return 0;
 }
 
-
-static int read_socket_name(struct server_options *srv_opts, char *arg)
-{
-	unsigned int i;
-	size_t len = snprintf(srv_opts->socket_name, SPR16_MAX_SOCKNAME, "%s", arg);
-	if (len == 0 || len  >= SPR16_MAX_SOCKNAME) {
-		printf("bad socket name\n");
-		goto failed;
-	}
-
-	for (i = 0; i < len; ++i)
-	{
-		char c = srv_opts->socket_name[i];
-		if (c <= 32 || c >= 127) {
-			printf("invalid character in socket name\n");
-			goto failed;
-		}
-		else if (c == '/' || c == '.') {
-			printf(" / or . found in socket name\n");
-			goto failed;
-		}
-	}
-	return 0;
-failed:
-	memset(srv_opts->socket_name, 0, SPR16_MAX_SOCKNAME);
-	return -1;
-}
-
 static void print_usage()
 {
 	printf("\n");
-	printf("usage: gtscreen <socket_name> <arguments>\n");
-	printf("\n");
-	printf("[socket_name]\n");
-	printf("    file name located in /tmp/spr16/\n");
+	printf("usage: gtscreen <arguments>\n");
 	printf("\n");
 	printf("[arguments]\n");
 	printf("    --printmodes  print all connectors and modes\n");
-	printf("    --inactive-vt vt is not active tty, don't take over framebuffer\n");
+	printf("    --inactive-vt current vt is not active, don't take over screen\n");
 	printf("\n");
 	printf("[environment variables]\n");
+	printf("    SPR16_SOCKET              name of socket in /tmp/spr16\n");
 	printf("    SPR16_SCREEN_WIDTH        preferred screen width\n");
 	printf("    SPR16_SCREEN_HEIGHT       preferred screen height\n");
 	printf("    SPR16_SCREEN_REFRESH      target refresh rate\n");
@@ -262,24 +263,16 @@ static void print_usage()
 int read_args(int argc, char *argv[], struct server_options *srv_opts)
 {
 	int i;
-	if (argc <= 1) {
-		print_usage();
-		printf("\n\nmissing first argument, socket name.\n");
-		return -1;
-	}
-
-	if (strncmp("--printmodes", argv[1], 13) == 0) {
-		drm_kms_print_modes("/dev/dri/card0"); /* FIXME card as argument */
-		return -1;
-	}
-
-	/* socket_name is mandatory first argument */
-	if (read_socket_name(srv_opts, argv[1]))
-		return -1;
+	if (argc <= 1)
+		return 0;
 
 	for (i = 2; i < argc; ++i)
 	{
-		if (strncmp("--inactive-vt", argv[i], 14) == 0) {
+		if (strncmp("--printmodes", argv[i], 13) == 0) {
+			drm_kms_print_modes("/dev/dri/card0"); /* TODO card arg/env */
+			return -1;
+		}
+		else if (strncmp("--inactive-vt", argv[i], 14) == 0) {
 			srv_opts->inactive_vt = 1;
 		}
 		else {
