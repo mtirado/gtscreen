@@ -188,6 +188,7 @@ static const OptionInfoRec *AvailableOptions(int chipid, int busid)
 
 static Bool Probe(DriverPtr drv, int flags)
 {
+	char *socket_name;
 	int i, numDevSections;
 	GDevPtr *devSections;
 	Bool foundScreen = FALSE;
@@ -209,7 +210,11 @@ static Bool Probe(DriverPtr drv, int flags)
 	if ((numDevSections = xf86MatchDevice("sporg", &devSections)) <= 0) {
 		return FALSE;
 	}
-	sinfo = get_servinfo("tty1"); /* XXX -- don't hardcode tty1 */
+
+	socket_name = getenv("SPR16_SOCKET");
+	if (socket_name == NULL)
+		socket_name = SPR16_DEFAULT_SOCKET;
+	sinfo = get_servinfo(socket_name);
 
 	g_maxvram  = sinfo.width * sinfo.height * (sinfo.bpp/8) / 1024;
 	if (g_maxvram == 0) {
@@ -554,6 +559,7 @@ static int create_input_descriptors(int *ipc)
 
 static Bool ScreenInit(SCREEN_INIT_ARGS_DECL)
 {
+	char *socket_name;
 	ScrnInfoPtr pScrn = xf86ScreenToScrn(pScreen);
 	sporgPtr sporg = sporgPTR(pScrn);
 	VisualPtr visual;
@@ -563,6 +569,10 @@ static Bool ScreenInit(SCREEN_INIT_ARGS_DECL)
 	pScrn->pScreen = pScreen;
 
 	fprintf(stderr, "---- sporg screen init ---------------------------\n");
+	socket_name = getenv("SPR16_SOCKET");
+	if (socket_name == NULL)
+		socket_name = SPR16_DEFAULT_SOCKET;
+
 	if (create_input_descriptors(ipc))
 		return -1;
 	/*pScrn->displayWidth = pScrn->virtualX - 24;*/
@@ -573,7 +583,7 @@ static Bool ScreenInit(SCREEN_INIT_ARGS_DECL)
 	 */
 	/* TODO need a function to unmap / free this,
 	 * and call it on failures if theres more than one screen. */
-	sprite = spr16_connect("tty1", g_servinfo.width, g_servinfo.height);
+	sprite = spr16_connect(socket_name, g_servinfo.width, g_servinfo.height);
 	if (!sprite) {
 		fprintf(stderr, "could not connect to spr16 display server\n");
 		return FALSE;
