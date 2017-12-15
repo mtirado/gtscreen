@@ -43,7 +43,6 @@
 #define SPR16_MAX_SOCKET 128
 #define SPR16_DEFAULT_SOCKET "socket"
 #define SPR16_SOCKPATH "/tmp/spr16"
-#define SPR16_LOGPATH "/usr/var/log/spr16"
 #define SPR16_ACK  1
 #define SPR16_NACK 0
 #define SPR16_MAXCLIENTS 128

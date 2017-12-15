@@ -531,14 +531,18 @@ static int open_log(char *socketname)
 {
 	char path[MAX_SYSTEMPATH];
 	int fd;
+
 	setvbuf(stdout, NULL, _IOLBF, 0);
 	setvbuf(stderr, NULL, _IOLBF, 0);
-	snprintf(path, sizeof(path), "%s/%s", SPR16_LOGPATH, socketname);
-	fd = open(path, O_WRONLY|O_CLOEXEC|O_CREAT|O_TRUNC, 0755);
+
+	snprintf(path, sizeof(path), "%s/%s.log", SPR16_SOCKPATH, socketname);
+	fd = open(path, O_WRONLY|O_CLOEXEC|O_CREAT, 0750);
 	if (fd == -1) {
-		printf("open log: %s\n", STRERR);
+		printf("open log (%s): %s\n", path, STRERR);
 		return -1;
 	}
+	fchmod(fd, 0750);
+
 	if (dup2(fd, STDOUT_FILENO) != STDOUT_FILENO
 			|| dup2(fd, STDERR_FILENO) != STDERR_FILENO) {
 		printf("dup2: %s\n", STRERR);
@@ -551,6 +555,7 @@ static int server_create_socket(struct server_context *self, char *sockname)
 {
 	int sock;
 	struct sockaddr_un addr;
+	uid_t euid;
 
 	memset(&addr, 0, sizeof(addr));
 
@@ -565,14 +570,23 @@ static int server_create_socket(struct server_context *self, char *sockname)
 		return -1;
 	}
 
+	/* create socket as real uid if we are running with setuid bit */
+	euid = geteuid();
+	if (seteuid(getuid()))
+		return -1;
 	if (bind(sock, (struct sockaddr *)&addr, sizeof(addr))) {
 		printf("    >>  socket already exists: %s  <<    \n", addr.sun_path);
 		printf("bind: %s\n", STRERR);
 		close(sock);
 		return -1;
 	}
+	if (seteuid(euid))
+		return -1;
 
-	chmod(addr.sun_path, 0770);
+	/* TODO no authentication for connecting to socket, could add a whitelist to
+	 * server and check peers uid/gid in ancillary data, or use some token */
+	chmod(addr.sun_path, 0777);
+
 	if (listen(sock, MAX_ACCEPT)) {
 		printf("listen: %s\n", STRERR);
 		close(sock);

@@ -29,7 +29,7 @@
 #include <malloc.h>
 #include <signal.h>
 #include <stdlib.h>
-
+#include <sys/stat.h>
 #include "defines.h"
 #include "spr16.h"
 #include "screen.h"
@@ -283,6 +283,56 @@ int read_args(int argc, char *argv[], struct server_options *srv_opts)
 	return 0;
 }
 
+int check_fs()
+{
+	struct stat st;
+	int r;
+
+	r = stat(SPR16_SOCKPATH, &st);
+	if (r == -1 && errno != ENOENT) {
+		printf("stat(%s): %s\n", SPR16_SOCKPATH, strerror(errno));
+		return -1;
+	}
+	else if (r == -1 && errno == ENOENT) {
+		mode_t um = umask(0);
+		gid_t gid = getgid();
+
+		/* doesn't exist, create it if we can switch to root gid */
+		if (setgid(0))
+			goto err_gid;
+		if (mkdir(SPR16_SOCKPATH, 01707)) {
+			printf("mkdir(%s, 01707): %s\n", SPR16_SOCKPATH, strerror(errno));
+			return -1;
+		}
+		if (setgid(gid))
+			goto err_gid;
+		umask(um);
+	}
+	else {
+		/* exists, make sure it's a dir owned by root with sticky bit */
+		if (!S_ISDIR(st.st_mode)) {
+			printf(" %s is not a directory\n", SPR16_SOCKPATH);
+			return -1;
+		}
+		if (!(S_ISVTX & st.st_mode)) {
+			printf("sticky bit missing from %s\n", SPR16_SOCKPATH);
+			printf("chmod 01707 is one way to set this.\n");
+			return -1;
+		}
+
+		if (st.st_uid != 0 || st.st_gid != 0) {
+			printf("%s does not belong to root\n", SPR16_SOCKPATH);
+			return -1;
+		} /* TODO user owned sockpath instead of requiring a global root dir */
+	}
+	return 0;
+
+err_gid:
+	printf("%s\n", strerror(errno));
+	printf("cannot set group for creating %s\n", SPR16_SOCKPATH);
+	return -1;
+}
+
 int main(int argc, char *argv[])
 {
 	struct fdpoll_handler *fdpoll;
@@ -300,6 +350,8 @@ int main(int argc, char *argv[])
 	if (read_environ(&g_srv_opts))
 		return -1;
 	if (read_args(argc, argv, &g_srv_opts))
+		return -1;
+	if (check_fs())
 		return -1;
 
 	fdpoll = fdpoll_handler_create(MAX_FDPOLL_HANDLER, 1);
