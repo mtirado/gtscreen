@@ -199,7 +199,7 @@ int touch_draw()
 			unsigned int pindex = i % colors;
 			uint16_t x, y, w, h;
 			x = g_contacts[i].pos.x;
-			y = g_contacts[i].pos.y;
+			y = g_screen->height - g_contacts[i].pos.y;
 			w = (50*g_contacts[i].magnitude);
 			h = (50*g_contacts[i].magnitude);
 			if (x+w >= g_screen->width)
@@ -207,7 +207,10 @@ int touch_draw()
 			if (y+h >= g_screen->height)
 				y = g_screen->height - h;
 			draw_fillrect(g_screen, x, y, w, h, g_palette[pindex]);
-			if (spr16_client_sync(x, y, x+w, x+h, SPRITESYNC_FLAG_ASYNC)) {
+			/* sync is now top-left oriented */
+			if (spr16_client_sync(x, g_screen->height - (y+h),
+						x+w, g_screen->height - y,
+						SPRITESYNC_FLAG_ASYNC)) {
 				if (errno != EAGAIN) {
 					return -1;
 				}
