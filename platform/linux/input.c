@@ -44,8 +44,8 @@
 const char devpfx[] = "event";
 const char devdir[] = "/dev/input";
 
-#define TAP_DELAY  210000 /* microseconds between last tap up, for tap click */
-#define TAP_STABL  300000 /* delay permitted from last big motion */
+#define TAP_DELAY  280000 /* microseconds between last tap up, for tap click */
+#define TAP_STABL  350000 /* delay permitted from last big motion */
 
 extern struct server_options g_srv_opts;
 extern sig_atomic_t g_input_muted; /* don't forward input if muted */
@@ -82,6 +82,7 @@ struct drv_evdev_pvt {
 	/* trackpad emulation, convert abs_xy to relative with tap to click */
 	int is_trackpad;
 	int tap_check;
+	int has_tapped;
 	int tap_reacquire;
 	float track_x;
 	float track_y;
@@ -309,9 +310,33 @@ static int usecs_elapsed(struct timespec curtime, struct timespec timestamp)
 	return usec;
 }
 
+/* do not subtract more than 1 second */
+static int usecs_subtract(struct timespec *curtime, unsigned int usecs)
+{
+	time_t nsecs;
+	if (usecs > 1000000 || curtime->tv_sec == 0)
+		return -1;
+	nsecs = usecs * 1000;
+	if (nsecs <= curtime->tv_nsec)
+		curtime->tv_nsec -= nsecs;
+	else {
+		nsecs -= curtime->tv_nsec;
+		curtime->tv_sec -= 1;
+		curtime->tv_nsec = 1000000000 - nsecs;
+	}
+	return 0;
+}
+
 static void trackpad_tap_up(struct drv_evdev_pvt *pvt)
 {
-	pvt->last_tap_up = pvt->curtime;
+	if (pvt->has_tapped) {
+		pvt->has_tapped = 0;
+		pvt->last_tap_up = pvt->curtime;
+		usecs_subtract(&pvt->last_tap_up, TAP_DELAY - (TAP_DELAY/2));
+	}
+	else {
+		pvt->last_tap_up = pvt->curtime;
+	}
 	pvt->tap_reacquire = 4;
 	pvt->tap_up_x = pvt->track_x;
 	pvt->tap_up_y = pvt->track_y;
@@ -678,7 +703,7 @@ static int abs_to_trackpad(struct drv_evdev_pvt *self,
 				self->relative_accel / SPR16_RELATIVE_SCALE);
 	}
 
-	if (fabs(delta) > min_delta * 12.5) {
+	if (fabs(delta) > min_delta * 30) {
 		self->last_bigmotion = self->curtime;
 	}
 	delta *= CURVE_SCALE * SPR16_RELATIVE_SCALE;
@@ -1072,6 +1097,7 @@ interrupted:
 			data.id   = self->device_id;
 			data.code = SPR16_KEYCODE_CONTACT;
 			data.val  = 1;
+			pvt->has_tapped = 1;
 			if (spr16_write_msg(cl_fd, &hdr, &data, sizeof(data))) {
 				/* FIXME too  ^^ */
 				/*return (errno == EAGAIN) ? 0 : -1;*/
