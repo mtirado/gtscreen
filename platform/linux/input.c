@@ -44,7 +44,6 @@
 const char devpfx[] = "event";
 const char devdir[] = "/dev/input";
 
-#define TAP_DELAY  280000 /* microseconds between last tap up, for tap click */
 #define TAP_STABL  350000 /* delay permitted from last big motion */
 
 extern struct server_options g_srv_opts;
@@ -84,6 +83,7 @@ struct drv_evdev_pvt {
 	int tap_check;
 	int has_tapped;
 	int tap_reacquire;
+	unsigned int tap_delay;
 	float track_x;
 	float track_y;
 	float tap_up_x;
@@ -293,7 +293,7 @@ int transceive_raw(int fd, int event_flags, void *user_data)
 	return FDPOLL_HANDLER_REMOVE;
 }
 
-static int usecs_elapsed(struct timespec curtime, struct timespec timestamp)
+static unsigned int usecs_elapsed(struct timespec curtime, struct timespec timestamp)
 {
 	struct timespec elapsed;
 	unsigned int usec;
@@ -332,7 +332,7 @@ static void trackpad_tap_up(struct drv_evdev_pvt *pvt)
 	if (pvt->has_tapped) {
 		pvt->has_tapped = 0;
 		pvt->last_tap_up = pvt->curtime;
-		usecs_subtract(&pvt->last_tap_up, TAP_DELAY - (TAP_DELAY/2));
+		usecs_subtract(&pvt->last_tap_up, pvt->tap_delay / 2);
 	}
 	else {
 		pvt->last_tap_up = pvt->curtime;
@@ -420,7 +420,7 @@ static int evdev_translate_btns(struct input_device *self, struct spr16_msgdata_
 			msg->code = SPR16_KEYCODE_CONTACT;
 			return 0;
 		}
-		else if (usecs_elapsed(pvt->curtime, pvt->last_tap_up)<TAP_DELAY) {
+		else if (usecs_elapsed(pvt->curtime, pvt->last_tap_up)<pvt->tap_delay) {
 			if (usecs_elapsed(pvt->curtime, pvt->last_bigmotion)<TAP_STABL) {
 				return -1;
 			}
@@ -703,7 +703,8 @@ static int abs_to_trackpad(struct drv_evdev_pvt *self,
 				self->relative_accel / SPR16_RELATIVE_SCALE);
 	}
 
-	if (fabs(delta) > min_delta * 30) {
+	/* this constant may need adjustment for relative surface size */
+	if (fabs(delta) > min_delta * 35) {
 		self->last_bigmotion = self->curtime;
 	}
 	delta *= CURVE_SCALE * SPR16_RELATIVE_SCALE;
@@ -1354,6 +1355,7 @@ void evdev_load_settings(struct drv_evdev_pvt *pvt, unsigned int dev_class)
 	if (dev_class == SPR16_DEV_MOUSE || dev_class == SPR16_DEV_TOUCH) {
 		pvt->relative_accel = g_srv_opts.pointer_accel;
 		pvt->vscroll_amount = g_srv_opts.vscroll_amount;
+		pvt->tap_delay      = g_srv_opts.tap_delay;
 	}
 }
 
@@ -1681,9 +1683,6 @@ void load_linux_input_drivers(struct server_context *ctx,
 					struct drv_evdev_pvt *drv;
 					drv = (*device_list)->private;
 					drv->is_trackpad = 1;
-					if (getenv("SPR16_POINTER_ACCEL") == NULL) {
-						drv->relative_accel = 100;
-					}
 					printf("using trackpad device: %s\n", prp->path);
 				}
 				else {

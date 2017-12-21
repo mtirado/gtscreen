@@ -166,7 +166,8 @@ int read_environ(struct server_options *srv_opts)
 	char *estr = NULL;
 	char *err = NULL;
 	int vscroll_amount     = 30;
-	uint16_t pointer_accel = 0;
+	uint32_t tap_delay     = 280000; /* microseconds */
+	uint16_t pointer_accel = 160;
 	uint16_t req_width     = 0;
 	uint16_t req_height    = 0;
 	uint16_t req_refresh   = 60;
@@ -219,11 +220,22 @@ int read_environ(struct server_options *srv_opts)
 	estr = getenv("SPR16_POINTER_ACCEL");
 	if (estr != NULL) {
 		errno = 0;
-		pointer_accel = strtol(estr, &err, 10);
+		pointer_accel = strtoul(estr, &err, 10);
 		if (err == NULL || *err || errno) {
 			printf("erroneous environ SPR16_POINTER_ACCEL\n");
 				return -1;
 		}
+	}
+
+	estr = getenv("SPR16_TAP_DELAY");
+	if (estr != NULL) {
+		errno = 0;
+		tap_delay = strtoul(estr, &err, 10);
+		if (err == NULL || *err || errno) {
+			printf("erroneous environ SPR16_TAP_DELAY\n");
+				return -1;
+		}
+		tap_delay = tap_delay * 1000;
 	}
 
 	estr = getenv("SPR16_SOCKET");
@@ -232,6 +244,7 @@ int read_environ(struct server_options *srv_opts)
 	if (read_socket_name(srv_opts, estr))
 		return -1;
 
+	srv_opts->tap_delay       = tap_delay;
 	srv_opts->pointer_accel   = pointer_accel;
 	srv_opts->vscroll_amount  = vscroll_amount;
 	srv_opts->request_width   = req_width;
@@ -257,6 +270,7 @@ static void print_usage()
 	printf("    SPR16_VSCROLL_AMOUNT      vertical scroll minimum\n");
 	printf("    SPR16_POINTER_ACCEL       pointer acceleration\n");
 	printf("    SPR16_TRACKPAD            surface acts as trackpad\n");
+	printf("    SPR16_TAP_DELAY           millisecond delay for tap to click\n");
 	printf("\n");
 }
 

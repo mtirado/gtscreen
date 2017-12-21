@@ -351,6 +351,7 @@ struct server_options
 	uint16_t request_width;
 	uint16_t request_height;
 	uint16_t request_refresh;
+	uint32_t tap_delay; /* surface tap click delay */
 	int pointer_accel;
 	int vscroll_amount;
 	int inactive_vt;
