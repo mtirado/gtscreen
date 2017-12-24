@@ -704,7 +704,7 @@ static int abs_to_trackpad(struct drv_evdev_pvt *self,
 	}
 
 	/* this constant may need adjustment for relative surface size */
-	if (fabs(delta) > min_delta * 35) {
+	if (fabs(delta) > min_delta * 20) {
 		self->last_bigmotion = self->curtime;
 	}
 	delta *= CURVE_SCALE * SPR16_RELATIVE_SCALE;
