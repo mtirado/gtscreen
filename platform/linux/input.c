@@ -1259,7 +1259,7 @@ static struct prospective_path *find_most_capable(int dev_class)
 
 		devfd = open(path, O_RDONLY);
 		if (devfd == -1)
-			goto err_close;
+			continue;
 		if (ioctl(devfd, EVIOCGBIT(0, sizeof(evbits)), evbits) == -1)
 			goto err_close;
 		if (ioctl(devfd, EVIOCGBIT(EV_KEY, sizeof(keybits)), keybits) == -1)
