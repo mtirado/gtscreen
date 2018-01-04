@@ -881,6 +881,7 @@ static unsigned int consume_surface_report(struct input_device *self, int client
 					&pvt->contact_magmax, min, max, 0);
 			send_msg = 1;
 		}
+		break;
 
 	case ABS_MT_PRESSURE:
 		if (active_id < 0)
@@ -895,6 +896,7 @@ static unsigned int consume_surface_report(struct input_device *self, int client
 				&pvt->contact_magmax, min, max, 0);
 		send_msg = 1;
 		break;
+
 	case SYN_MT_REPORT:
 		printf("TODO - consumed %d mt proto A events\n", i-start);
 		printf("protocolA is currently not supported\n");
