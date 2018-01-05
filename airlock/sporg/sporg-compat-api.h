@@ -28,6 +28,8 @@
 #ifndef COMPAT_API_H
 #define COMPAT_API_H
 
+#include "xf86Crtc.h" /* for version macro */
+
 #ifndef GLYPH_HAS_GLYPH_PICTURE_ACCESSOR
 #define GetGlyphPicture(g, s) GlyphPicture((g))[(s)->myNum]
 #define SetGlyphPicture(g, s, p) GlyphPicture((g))[(s)->myNum] = p
@@ -73,8 +75,14 @@
 
 #define SCREEN_INIT_ARGS_DECL ScreenPtr pScreen, int argc, char **argv
 
-#define BLOCKHANDLER_ARGS_DECL ScreenPtr arg, pointer pTimeout, pointer pReadmask
-#define BLOCKHANDLER_ARGS arg, pTimeout, pReadmask
+/* FIXME find out exactly what version requires new block handler */
+#if XORG_VERSION_CURRENT < XORG_VERSION_NUMERIC(1,19,0,0,0)
+	#define BLOCKHANDLER_ARGS_DECL ScreenPtr arg, pointer pTimeout, pointer pReadmask
+	#define BLOCKHANDLER_ARGS arg, pTimeout, pReadmask
+#else
+	#define BLOCKHANDLER_ARGS_DECL ScreenPtr arg, pointer pTimeout
+	#define BLOCKHANDLER_ARGS arg, pTimeout
+#endif
 
 #define CLOSE_SCREEN_ARGS_DECL ScreenPtr pScreen
 #define CLOSE_SCREEN_ARGS pScreen
