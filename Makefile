@@ -10,6 +10,9 @@ endif
 ifndef BINDIR
 BINDIR:="bin"
 endif
+ifndef XORG_MOD_DIR
+XORG_MOD_DIR:=lib/xorg/modules
+endif
 
 # if you use a 64 bit system set bitcount(TODO untested).
 # errgh, and fix the memfd syscall it only works on x86
@@ -185,9 +188,9 @@ install:
 	@install -Dvm 0755  "$(LANDIT)"      "$(DESTDIR)/$(BINDIR)/$(LANDIT)"
 	@install -Dvm 0755  airlock/sporg/xorg.conf "$(DESTDIR)/$(CFGDIR)"
 	@install -Dvm 0755  "$(SPORG_GFX)"   \
-		"$(DESTDIR)/lib/xorg/modules/drivers/$(SPORG_GFX)"
+		"$(DESTDIR)/$(XORG_MOD_DIR)/drivers/$(SPORG_GFX)"
 	@install -Dvm 0755  "$(SPORG_INPUT)" \
-		"$(DESTDIR)/lib/xorg/modules/input/$(SPORG_INPUT)"
+		"$(DESTDIR)/$(XORG_MOD_DIR)/input/$(SPORG_INPUT)"
 
 clean:
 	@$(foreach obj, $(GTSCREEN_OBJS), rm -fv $(obj);)
