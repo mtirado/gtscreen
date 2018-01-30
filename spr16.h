@@ -20,7 +20,6 @@
 
 #include <stdint.h>
 #include <stddef.h>
-#include "screen.h"
 /*
  * currently, one client = one shared mem region
  * memory is mapped as part of connection handshake.

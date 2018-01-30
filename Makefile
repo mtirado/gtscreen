@@ -71,7 +71,8 @@ VSYNC_TEST_OBJS := $(VSYNC_TEST_SRCS:.c=.vsync-test.o)	\
 #  spr16-x11-xorg graphic drivers
 SPORG_GFX_SRCS := ./airlock/sporg/sporg.c		\
 		  ./airlock/sporg/sporg_client.c
-SPORG_GFX_OBJS := $(SPORG_GFX_SRCS:.c=.sporg_gfx.o)
+SPORG_GFX_OBJS := $(SPORG_GFX_SRCS:.c=.sporg_gfx.o)	\
+		  ./lib/libspr16_cl.a
 SPORG_GFX_INC := -I/usr/include/xorg -I/usr/include/pixman-1
 
 #  spr16-x11-xorg input driver

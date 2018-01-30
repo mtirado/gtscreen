@@ -23,6 +23,7 @@
 #include <sys/un.h>
 #include <sys/socket.h>
 #include <sys/mman.h>
+#include <stdlib.h>
 #include "../../spr16.h"
 
 #define STRERR strerror(errno)
@@ -73,6 +74,14 @@ int spr16_client_init()
 int spr16_client_connect(char *name)
 {
 	struct sockaddr_un addr;
+
+	if (name == NULL) {
+		name = getenv("SPR16_SOCKET");
+		if (name == NULL) {
+			fprintf(stderr, "using SPR16_SOCKET=%s\n", SPR16_DEFAULT_SOCKET);
+			name = SPR16_DEFAULT_SOCKET;
+		}
+	}
 
 	memset(&addr, 0, sizeof(addr));
 	addr.sun_family = AF_UNIX;

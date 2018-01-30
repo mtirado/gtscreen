@@ -21,8 +21,8 @@
 #include <memory.h>
 #include <unistd.h>
 #include <sys/ioctl.h>
+#include "../../screen.h"
 #include "fb.h"
-
 
 extern void x86_sse2_xmmcpy_128(char *dest, char *src, unsigned int count);
 extern void x86_sse2_xmmcpy_512(char *dest, char *src, unsigned int count);
