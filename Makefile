@@ -10,6 +10,12 @@ endif
 ifndef BINDIR
 BINDIR:="bin"
 endif
+ifndef INCDIR
+INCDIR:="include/spr16"
+endif
+ifndef LIBDIR
+LIBDIR:="lib"
+endif
 ifndef XORG_MOD_DIR
 XORG_MOD_DIR:=lib/xorg/modules
 endif
@@ -46,30 +52,25 @@ LANDIT_SRCS := 	./examples/landit.c		\
 		./examples/dynamics.c		\
 		./examples/moon.c		\
 		./examples/craft.c		\
-		./examples/particle.c		\
-		./platform/linux/messages.c	\
-		./platform/linux/client.c
-LANDIT_OBJS := $(LANDIT_SRCS:.c=.spr16_ex.o)
+		./examples/particle.c
+LANDIT_OBJS := $(LANDIT_SRCS:.c=.spr16_ex.o)	\
+		./lib/libspr16_cl.a
 
 # touch input example
 TOUCHPAINT_SRCS := ./examples/touchpaint.c		\
-		   ./examples/util.c			\
-		   ./platform/linux/messages.c		\
-		   ./platform/linux/client.c
-TOUCHPAINT_OBJS := $(TOUCHPAINT_SRCS:.c=.touchpaint.o)
+		   ./examples/util.c
+TOUCHPAINT_OBJS := $(TOUCHPAINT_SRCS:.c=.touchpaint.o)	\
+		   ./lib/libspr16_cl.a
 
 # screen tearing test pattern
 VSYNC_TEST_SRCS := ./examples/vsync-test.c		\
-		   ./examples/util.c			\
-		   ./platform/linux/messages.c		\
-		   ./platform/linux/client.c
-VSYNC_TEST_OBJS := $(VSYNC_TEST_SRCS:.c=.vsync-test.o)
+		   ./examples/util.c
+VSYNC_TEST_OBJS := $(VSYNC_TEST_SRCS:.c=.vsync-test.o)	\
+		   ./lib/libspr16_cl.a
 
 #  spr16-x11-xorg graphic drivers
-SPORG_GFX_SRCS := 	./airlock/sporg/sporg.c		\
-			./airlock/sporg/sporg_client.c	\
-			./platform/linux/messages.c	\
-			./platform/linux/client.c
+SPORG_GFX_SRCS := ./airlock/sporg/sporg.c		\
+		  ./airlock/sporg/sporg_client.c
 SPORG_GFX_OBJS := $(SPORG_GFX_SRCS:.c=.sporg_gfx.o)
 SPORG_GFX_INC := -I/usr/include/xorg -I/usr/include/pixman-1
 
@@ -87,13 +88,15 @@ TOUCHPAINT  := touchpaint
 VSYNC_TEST  := vsync_test
 SPORG_GFX   := sporg_drv.so
 SPORG_INPUT := sporginput_drv.so
-
+LIB_CLIENT  := libspr16_cl.a
 
 ########################################
 # build
 ########################################
 %.asm.o: %.s
 	$(AS) -o $@ $<
+%.c.o: %.c
+	$(CC) -c $(DEFLANG) $(CFLAGS) $(DBG) -o $@ $<
 %.gtscreen.o: %.c
 	$(CC) -c $(DEFLANG) -DSPR16_SERVER $(CFLAGS) $(DBG) -o $@ $<
 %.spr16_ex.o: %.c
@@ -109,6 +112,7 @@ SPORG_INPUT := sporginput_drv.so
 %.sporg_input.o: %.c
 	$(CC) -c -std=gnu99 -pedantic -Wall -fPIC $(DBG) $(SPORG_INPUT_INC) -o $@ $<
 all:			\
+	$(LIB_CLIENT)	\
 	$(GTSCREEN)	\
 	$(LANDIT)	\
 	$(TOUCHPAINT)	\
@@ -127,57 +131,70 @@ all:			\
 $(GTSCREEN):		$(GTSCREEN_OBJS)
 			$(CC) $(DEFINES) -lm $(LDFLAGS) $(DBG_LDFLAGS) $(GTSCREEN_OBJS) -o $@
 			@echo ""
-			@echo "x---------------------x"
-			@echo "| gtscreen         OK |"
-			@echo "x---------------------x"
+			@echo "x----------------x"
+			@echo "| gtscreen       |"
+			@echo "x----------------x"
 			@echo ""
 
 $(LANDIT):		$(LANDIT_OBJS)
 			$(CC) $(LDFLAGS) -lm $(LANDIT_OBJS) -o $@
 			@echo ""
-			@echo "x---------------------x"
-			@echo "| landit           OK |"
-			@echo "x---------------------x"
+			@echo "x----------------x"
+			@echo "| landit         |"
+			@echo "x----------------x"
 			@echo ""
 
 $(TOUCHPAINT):		$(TOUCHPAINT_OBJS)
 			$(CC) $(LDFLAGS) -lm $(TOUCHPAINT_OBJS) -o $@
 			@echo ""
-			@echo "x---------------------x"
-			@echo "| touchpaint       OK |"
-			@echo "x---------------------x"
+			@echo "x----------------x"
+			@echo "| touchpaint     |"
+			@echo "x----------------x"
 			@echo ""
 
 $(VSYNC_TEST):		$(VSYNC_TEST_OBJS)
 			$(CC) $(LDFLAGS) -lm $(VSYNC_TEST_OBJS) -o $@
 			@echo ""
-			@echo "x---------------------x"
-			@echo "| vsync_test       OK |"
-			@echo "x---------------------x"
+			@echo "x----------------x"
+			@echo "| vsync_test     |"
+			@echo "x----------------x"
 			@echo ""
 
 $(SPORG_GFX):		$(SPORG_GFX_OBJS)
 			$(CC) $(LDFLAGS) -shared $(SPORG_GFX_OBJS) -o $@
 			@echo ""
-			@echo "x---------------------x"
-			@echo "| sporg_gfx        OK |"
-			@echo "x---------------------x"
+			@echo "x----------------x"
+			@echo "| sporg_gfx      |"
+			@echo "x----------------x"
 			@echo ""
 
 $(SPORG_INPUT):	$(SPORG_INPUT_OBJS)
 			$(CC) $(LDFLAGS) -shared -lX11 $(SPORG_INPUT_OBJS) -o $@
 			@echo ""
-			@echo "x---------------------x"
-			@echo "| sporg_input      OK |"
-			@echo "x---------------------x"
+			@echo "x----------------x"
+			@echo "| sporg_input    |"
+			@echo "x----------------x"
+			@echo ""
+
+$(LIB_CLIENT):	./platform/linux/messages.c.o ./platform/linux/client.c.o
+			@mkdir -p ./lib
+			$(AR) rcs ./lib/$(LIB_CLIENT) ./platform/linux/messages.c.o ./platform/linux/client.c.o
+			@echo ""
+			@echo "x----------------x"
+			@echo "| sporg_cl.a     |"
+			@echo "x----------------x"
 			@echo ""
 
 install:
 	@umask 022
 	@install -dvm 0755  "$(DESTDIR)/$(CFGDIR)"
 	@install -dvm 0755  "$(DESTDIR)/$(BINDIR)"
+	@install -dvm 0755  "$(DESTDIR)/$(INCDIR)"
+	@install -dvm 0755  "$(DESTDIR)/$(LIBDIR)"
 	@install -dvm 0755  "$(DESTDIR)/lib/xorg/modules/drivers"
 	@install -dvm 0755  "$(DESTDIR)/lib/xorg/modules/input"
+	@install -Dvm 0755  "./spr16.h" "$(DESTDIR)/$(INCDIR)"
+	@install -Dvm 0755  "./lib/$(LIB_CLIENT)" "$(DESTDIR)/$(LIBDIR)/"
 	@install -Dvm 0755  "$(GTSCREEN)"    "$(DESTDIR)/$(BINDIR)/$(GTSCREEN)"
 	@install -Dvm 0755  "$(TOUCHPAINT)"  "$(DESTDIR)/$(BINDIR)/$(TOUCHPAINT)"
 	@install -Dvm 0755  "$(VSYNC_TEST)"  "$(DESTDIR)/$(BINDIR)/$(VSYNC_TEST)"
@@ -197,6 +214,7 @@ clean:
 	@$(foreach obj, $(SPORG_INPUT_OBJS), rm -fv $(obj);)
 
 	@-rm -fv ./$(GTSCREEN)
+	@-rm -fv ./lib/$(LIB_CLIENT)
 	@-rm -fv ./$(LANDIT)
 	@-rm -fv ./$(TOUCHPAINT)
 	@-rm -fv ./$(VSYNC_TEST)
