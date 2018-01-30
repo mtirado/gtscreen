@@ -82,7 +82,6 @@ static Bool sporg_driver_func(ScrnInfoPtr scrn, xorgDriverFuncOp op, void *data)
 struct spr16_msgdata_servinfo g_servinfo;
 uint32_t g_maxvram;
 
-
 enum {
 	FAUX_CHIPSET=0
 };
@@ -194,7 +193,7 @@ static Bool Probe(DriverPtr drv, int flags)
 	Bool foundScreen = FALSE;
 	ScrnInfoPtr scrn = NULL;
 	struct spr16_msgdata_servinfo sinfo;
-	fprintf(stderr, "-- sporg gfx probe --\n");
+	xf86DrvMsg(0, X_INFO, "-- sporg gfx probe --\n");
 
 	if (g_maxvram)
 		return FALSE;
@@ -218,7 +217,7 @@ static Bool Probe(DriverPtr drv, int flags)
 
 	g_maxvram  = sinfo.width * sinfo.height * (sinfo.bpp/8) / 1024;
 	if (g_maxvram == 0) {
-		fprintf(stderr, "servinfo invalid\n");
+		xf86DrvMsg(0, X_ERROR, "servinfo invalid\n");
 		return FALSE;
 	}
 	g_servinfo = sinfo;
@@ -244,7 +243,6 @@ static Bool Probe(DriverPtr drv, int flags)
 			scrn->LeaveVT = LeaveVT;
 			scrn->FreeScreen = FreeScreen;
 			scrn->ValidMode = ValidMode;
-
 			xf86DrvMsg(scrn->scrnIndex, X_INFO, "using faux device");
 		}
 	}
@@ -366,12 +364,12 @@ static int init_faux_hw(ScrnInfoPtr pScrn)
 				pScrn->videoRam * 1024,
 				LOOKUP_BEST_REFRESH);
 	if (i == -1) {
-		fprintf(stderr, "xf86ValidateModes() fail.\n");
+		xf86DrvMsg(0, X_ERROR, "xf86ValidateModes() fail.\n");
 		return -1;
 	}
 	xf86PruneDriverModes(pScrn);
 	if (i == 0 || pScrn->modes == NULL) {
-		fprintf(stderr, "no modes found, use -config to specify modes\n");
+		xf86DrvMsg(0, X_ERROR, "no modes found, use -config to specify modes\n");
 		return -1;
 	}
 
@@ -463,7 +461,7 @@ static Bool PreInit(ScrnInfoPtr pScrn, int flags)
 	}
 
 	if (init_faux_hw(pScrn)) {
-		fprintf(stderr, "init_faux_hw fail\n");
+		xf86DrvMsg(0, X_ERROR, "init_faux_hw fail\n");
 		return FALSE;
 	}
 
@@ -566,9 +564,11 @@ static Bool ScreenInit(SCREEN_INIT_ARGS_DECL)
 	struct spr16 *sprite;
 	int ipc[2];
 
+	xf86DrvMsg(0, X_INFO, "---- sporg screen init ---------------------------\n");
+	xf86PrintBacktrace();
+	xf86DrvMsg(0, X_INFO, "--------------------------------------------------\n");
 	pScrn->pScreen = pScreen;
 
-	fprintf(stderr, "---- sporg screen init ---------------------------\n");
 	socket_name = getenv("SPR16_SOCKET");
 	if (socket_name == NULL)
 		socket_name = SPR16_DEFAULT_SOCKET;
@@ -585,12 +585,12 @@ static Bool ScreenInit(SCREEN_INIT_ARGS_DECL)
 	 * and call it on failures if theres more than one screen. */
 	sprite = spr16_connect(socket_name, g_servinfo.width, g_servinfo.height);
 	if (!sprite) {
-		fprintf(stderr, "could not connect to spr16 display server\n");
+		xf86DrvMsg(0, X_ERROR, "could not connect to spr16 display server\n");
 		return FALSE;
 	}
 	sporg->FBBase = (pointer *)sprite->shmem.addr;
 	if (fork_client(ipc[1])) {
-		fprintf(stderr, "unable to start spr16 client\n");
+		xf86DrvMsg(0, X_ERROR, "unable to start spr16 client\n");
 		return FALSE;
 	}
 	miClearVisualTypes();
@@ -648,7 +648,9 @@ static Bool ScreenInit(SCREEN_INIT_ARGS_DECL)
 		return FALSE;
 
 	xf86ShowUnusedOptions(pScrn->scrnIndex, pScrn->options);
-	return EnterVT(VT_FUNC_ARGS);
+	if (EnterVT(VT_FUNC_ARGS) != TRUE)
+		return FALSE;
+	return TRUE;
 }
 
 static void AdjustFrame(ADJUST_FRAME_ARGS_DECL) {}

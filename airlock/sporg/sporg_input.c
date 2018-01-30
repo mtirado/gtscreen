@@ -191,7 +191,7 @@ static uint32_t spr16_to_x11(DeviceIntPtr dev, uint32_t code)
 
 	symbols = XkbGetCoreMap(dev);
 	if (symbols == NULL) {
-		fprintf(stderr, "XkbGetCoreMap is null\n");
+		xf86DrvMsg(0, X_INFO, "XkbGetCoreMap is null\n");
 		return 0;
 	}
 
@@ -403,7 +403,7 @@ static void control_input(InputInfoPtr info, struct spr16_msgdata_input *msg)
 
 		break;
 	default:
-		fprintf(stderr, "control_input: unknown control code\n");
+		xf86DrvMsg(0, X_INFO, "control_input: unknown control code\n");
 		break;
 	}
 	return;
@@ -580,7 +580,7 @@ static int xf86VoidInit(InputDriverPtr drv, InputInfoPtr pInfo,	int flags)
 
 	fdnum = getenv("SPORG_INPUT_READ");
 	if (fdnum == NULL) {
-		fprintf(stderr, "couldn't locate input descriptor\n");
+		xf86DrvMsg(0, X_ERROR, "couldn't locate input descriptor\n");
 		return -1;
 	}
 	scroll_sensitivity = getenv("SPORG_SCROLL_SENSITIVITY");
@@ -594,7 +594,7 @@ static int xf86VoidInit(InputDriverPtr drv, InputInfoPtr pInfo,	int flags)
 	width  = getenv("SPORG_WIDTH");
 	height = getenv("SPORG_HEIGHT");
 	if (!width || !height) {
-		fprintf(stderr, "missing width/height env\n");
+		xf86DrvMsg(0, X_ERROR, "missing width/height env\n");
 		return -1;
 	}
 
@@ -602,7 +602,7 @@ static int xf86VoidInit(InputDriverPtr drv, InputInfoPtr pInfo,	int flags)
 	err = NULL;
 	input_read_fd = strtol(fdnum, &err, 10);
 	if (err == NULL || *err || errno || input_read_fd < 0) {
-		fprintf(stderr, "erroneous input fdnum\n");
+		xf86DrvMsg(0, X_ERROR, "erroneous input fdnum\n");
 		return -1;
 	}
 
@@ -611,7 +611,7 @@ static int xf86VoidInit(InputDriverPtr drv, InputInfoPtr pInfo,	int flags)
 	g_rootwidth = strtol(width, &err, 10);
 	if (err == NULL || *err || errno
 			|| g_rootwidth < 120 || g_rootwidth > UINT16_MAX) {
-		fprintf(stderr, "bad width env var\n");
+		xf86DrvMsg(0, X_ERROR, "bad width env var\n");
 		return -1;
 	}
 	errno = 0;
@@ -619,7 +619,7 @@ static int xf86VoidInit(InputDriverPtr drv, InputInfoPtr pInfo,	int flags)
 	g_rootheight = strtol(height, &err, 10);
 	if (err == NULL || *err || errno
 			|| g_rootheight < 120 || g_rootheight > UINT16_MAX) {
-		fprintf(stderr, "bad width env var\n");
+		xf86DrvMsg(0, X_ERROR, "bad width env var\n");
 		return -1;
 	}
 
@@ -628,14 +628,14 @@ static int xf86VoidInit(InputDriverPtr drv, InputInfoPtr pInfo,	int flags)
 	g_scroll_sensitivity = strtol(scroll_sensitivity, &err, 10);
 	if (err == NULL || *err || errno
 			|| g_scroll_sensitivity < 1 || g_scroll_sensitivity > 199) {
-		fprintf(stderr, "scroll sensitivity range is 1-199\n");
+		xf86DrvMsg(0, X_ERROR, "scroll sensitivity range is 1-199\n");
 		return -1;
 	}
 	g_scroll_sensitivity = 200 - g_scroll_sensitivity;
 
-	fprintf(stderr, "--------------------------------------------------\n");
-	fprintf(stderr, "- sporg input init -------------------------------\n");
-	fprintf(stderr, "--------------------------------------------------\n");
+	xf86DrvMsg(0, X_INFO, "--------------------------------------------------\n");
+	xf86DrvMsg(0, X_INFO, "- sporg input init -------------------------------\n");
+	xf86DrvMsg(0, X_INFO, "--------------------------------------------------\n");
 
 	/* Initialise the InputInfoRec. */
 	pInfo->type_name = "sporginput";
@@ -650,7 +650,7 @@ static int xf86VoidInit(InputDriverPtr drv, InputInfoPtr pInfo,	int flags)
 	g_rel_cursor_y = (g_rootheight/2) * (float)SPR16_RELATIVE_SCALE;
 	g_cursor = valuator_mask_new(CURSOR_COUNT);
 	if (g_cursor == NULL) {
-		fprintf(stderr, "valuator_mask_new: %s\n", STRERR);
+		xf86DrvMsg(0, X_ERROR, "valuator_mask_new");
 		return -1;
 	}
 	valuator_mask_zero(g_cursor);
