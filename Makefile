@@ -181,7 +181,7 @@ $(LIB_CLIENT):	./platform/linux/messages.c.o ./platform/linux/client.c.o
 			$(AR) rcs ./lib/$(LIB_CLIENT) ./platform/linux/messages.c.o ./platform/linux/client.c.o
 			@echo ""
 			@echo "x----------------x"
-			@echo "| sporg_cl.a     |"
+			@echo "| libspr16_cl.a  |"
 			@echo "x----------------x"
 			@echo ""
 
