@@ -48,32 +48,28 @@ LANDIT_SRCS := 	./examples/landit.c		\
 		./examples/craft.c		\
 		./examples/particle.c		\
 		./platform/linux/messages.c	\
-		./platform/linux/client.c	\
-		./platform/linux/drm.c
+		./platform/linux/client.c
 LANDIT_OBJS := $(LANDIT_SRCS:.c=.spr16_ex.o)
 
 # touch input example
 TOUCHPAINT_SRCS := ./examples/touchpaint.c		\
 		   ./examples/util.c			\
 		   ./platform/linux/messages.c		\
-		   ./platform/linux/client.c		\
-		   ./platform/linux/drm.c
+		   ./platform/linux/client.c
 TOUCHPAINT_OBJS := $(TOUCHPAINT_SRCS:.c=.touchpaint.o)
 
 # screen tearing test pattern
 VSYNC_TEST_SRCS := ./examples/vsync-test.c		\
 		   ./examples/util.c			\
 		   ./platform/linux/messages.c		\
-		   ./platform/linux/client.c		\
-		   ./platform/linux/drm.c
+		   ./platform/linux/client.c
 VSYNC_TEST_OBJS := $(VSYNC_TEST_SRCS:.c=.vsync-test.o)
 
 #  spr16-x11-xorg graphic drivers
 SPORG_GFX_SRCS := 	./airlock/sporg/sporg.c		\
 			./airlock/sporg/sporg_client.c	\
 			./platform/linux/messages.c	\
-			./platform/linux/client.c	\
-			./platform/linux/drm.c
+			./platform/linux/client.c
 SPORG_GFX_OBJS := $(SPORG_GFX_SRCS:.c=.sporg_gfx.o)
 SPORG_GFX_INC := -I/usr/include/xorg -I/usr/include/pixman-1
 

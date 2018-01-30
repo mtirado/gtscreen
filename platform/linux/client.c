@@ -68,7 +68,6 @@ int spr16_client_init()
 }
 
 /*
- * name is the vt we are on. e.g. tty1
  * returns connected socket
  */
 int spr16_client_connect(char *name)
