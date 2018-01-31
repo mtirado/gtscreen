@@ -99,7 +99,7 @@ static struct client *server_getclient(struct server_context *self, int fd)
 	return NULL;
 }
 
-static int is_being_freed(struct server_context *self, struct client *cl)
+static int in_free_list(struct server_context *self, struct client *cl)
 {
 	unsigned int i;
 	for (i = 0; i < self->free_count; ++i)
@@ -113,7 +113,11 @@ static int is_being_freed(struct server_context *self, struct client *cl)
 static int server_free_client(struct server_context *self, struct client *cl)
 {
 	if (self->free_count < MAX_FDPOLL_HANDLER) {
-		if (!is_being_freed(self, cl)) {
+		if (!in_free_list(self, cl)) {
+			if (fdpoll_handler_remove(self->fdpoll, cl->socket)) {
+				printf("couldn't remove handler for client %d\n", cl->socket);
+				return -1;
+			}
 			self->free_list[self->free_count] = cl;
 			++self->free_count;
 			return 0;
@@ -782,7 +786,6 @@ static int server_free_list(struct server_context *self)
 
 int spr16_server_update(struct server_context *self)
 {
-
 	/* this is where the server blocks.
 	 * -1 indefinite, 0 immediate, >0 milliseconds */
 	if (fdpoll_handler_poll(self->fdpoll, -1)) {
