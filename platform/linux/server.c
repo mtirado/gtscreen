@@ -256,6 +256,7 @@ static int server_addclient(struct server_context *self, int fd)
 	struct cl_cb_data *cb_data;
 	errno = 0;
 	printf("servr_addclient\n");
+
 	if (server_getclient(self, fd)) {
 		errno = EEXIST;
 		return -1;
@@ -536,7 +537,7 @@ static int open_log(char *socketname)
 	setvbuf(stderr, NULL, _IOLBF, 0);
 
 	snprintf(path, sizeof(path), "%s/%s.log", SPR16_SOCKPATH, socketname);
-	fd = open(path, O_WRONLY|O_CLOEXEC|O_CREAT, 0750);
+	fd = open(path, O_WRONLY|O_CLOEXEC|O_CREAT|O_TRUNC, 0750);
 	if (fd == -1) {
 		printf("open log (%s): %s\n", path, STRERR);
 		return -1;
@@ -968,6 +969,8 @@ int listener_callback(int fd, int event_flags, void *user_data)
 		 * also add a handshake timeout */
 		if (server_addclient(self, newsock)) {
 			printf("server_addclient(%d) failed\n", newsock);
+			if (errno == EEXIST)
+				printf("client already exists\n");
 			close(newsock);
 			return FDPOLL_HANDLER_OK;
 		}
