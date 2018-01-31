@@ -167,10 +167,6 @@ struct spr16_msgdata_sync {
 	uint16_t ymin;
 	uint16_t xmax;
 	uint16_t ymax;
-	/*uint16_t x;
-	uint16_t y;
-	uint16_t width;
-	uint16_t height;*/
 };
 
 /*
