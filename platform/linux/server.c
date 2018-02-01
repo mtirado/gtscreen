@@ -26,6 +26,7 @@
 #include <malloc.h>
 #include <unistd.h>
 #include <sys/un.h>
+#include <sys/syscall.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/mman.h>
@@ -149,7 +150,7 @@ static int server_remove_client(struct server_context *self, int fd)
 				return -1;
 			*trail = scrn->next;
 			/* TODO, clear region? */
-			free(scrn); /* FIXME, dont free, for multi-client... */
+			free(scrn); /* TODO, dont free, for multi-client... */
 			server_sync_fullscreen(self);
 			return 0;
 		}
@@ -239,6 +240,8 @@ static struct cl_cb_data *cb_data_add(struct server_context *self, struct client
 static int cb_data_remove(struct server_context *self, struct client *cl)
 {
 	struct cl_cb_data **trail, *cb_data;
+	if (cl == NULL)
+		return -1;
 	trail = &self->cb_data;
 	cb_data = self->cb_data;
 	while (cb_data)
@@ -259,7 +262,6 @@ static int server_addclient(struct server_context *self, int fd)
 	struct client *cl;
 	struct cl_cb_data *cb_data;
 	errno = 0;
-	printf("servr_addclient\n");
 
 	if (server_getclient(self, fd)) {
 		errno = EEXIST;
@@ -284,12 +286,13 @@ static int server_addclient(struct server_context *self, int fd)
 	cb_data = cb_data_add(self, cl);
 	if (cb_data == NULL)
 		goto err;
-	printf("add client(%d) ------\n", fd);
+
 	if (fdpoll_handler_add(self->fdpoll, fd, FDPOLLIN, client_callback, cb_data)) {
 		printf("fdpoll_handler_add(%d) failed\n", fd);
 		cb_data_remove(self, cl);
 		goto err;
 	}
+	/* TODO, get creds and log uid/gid/pid */
 	printf("client(%d)added to server\n", fd);
 	return 0;
 err:
@@ -306,7 +309,6 @@ static int client_handshake(struct server_context *self, struct client *cl)
 		printf("handshake connect failed\n");
 		return -1;
 	}
-	printf("client connected, returning handler OK\n");
 	return 0;
 }
 
@@ -315,26 +317,19 @@ static int handle_ack(struct server_context *self, struct client *cl, struct spr
 	switch (ack->info)
 	{
 		case SPRITEACK_ESTABLISHED:
-			printf("calling client handshake\n");
 			if (client_handshake(self, cl))
 				return -1;
-			printf("client has ack'd, established connection\n");
 			break;
 		case SPRITEACK_SEND_FD:
-			printf("server got SEND_FD\n");
 			if (!cl->recv_fd_wait)
 				return -1;
-			printf("fd wait is set...  fd==%d\n",cl->sprite.shmem.fd);
 			if (cl->sprite.shmem.fd <= 0)
 				return -1;
-			printf("caling sendfd\n");
 			if (afunix_send_fd(cl->socket, cl->sprite.shmem.fd)) {
 				printf("could not send descriptor\n");
 				return -1;
 			}
 			cl->recv_fd_wait = 0;
-			printf("memory mapped fd in flight\n");
-
 			break;
 
 		default:
@@ -366,29 +361,12 @@ static int handle_nack(struct server_context *self, struct client *cl, struct sp
 	return -1;
 }
 
-#ifdef __i386__
 /* including fcntl.h is giving me redefinitions, this is hacky and i'm sorry */
 extern int fcntl(int __fd, int __cmd, ...);
 int memfd_create(const char *__name, unsigned int __flags)
 {
-	/* wow this is blows up on 4.8.3 when called from an xorg driver */
-#if 0
-	int retval = -1;
-	__asm__("movl $356, %eax");    /* syscall number */
-	__asm__("movl 8(%ebp), %ebx"); /* name */
-	__asm__("movl 12(%ebp),%ecx"); /* flags */
-	__asm__("int $0x80");
-	__asm__("movl %%eax, %0" : "=q" (retval));
-	(void) __name;
-	(void) __flags;
-	return retval;
-#endif
-	/* TODO detect arch, 356 is x86 */
-	return syscall(356, __name, __flags);
+	return syscall(SYS_memfd_create, __name, __flags);
 }
-#else
-	#error "unsupported kernel arch (no syscall wrapper for memfd, afaik)"
-#endif
 
 int spr16_create_memfd(struct client *cl)
 {

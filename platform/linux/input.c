@@ -1130,8 +1130,7 @@ static void select_prp(struct prospective_path *p, char *path, unsigned int key,
 	p->rel = rel;
 	p->abs = abs;
 	p->ff  = ff;
-	printf("prospective input device: %s\n", path);
-	printf("key(%d) rel(%d) abs(%d) ff(%d)\n", key, rel, abs, ff);
+	printf("%s: key(%d) rel(%d) abs(%d) ff(%d)\n", path, key, rel, abs, ff);
 }
 
 static struct prospective_path *check_environ(int dev_class)
@@ -1213,7 +1212,7 @@ static int probably_surface(unsigned long *absbits, unsigned long *keybits) {
 		 && bit_check(absbits, ABS_Y, ABS_CNT))
 		|| (bit_check(absbits, ABS_MT_POSITION_X, ABS_CNT)
 		 && bit_check(absbits, ABS_MT_POSITION_Y, ABS_CNT));
-	printf("btn %d abs %d\n", btn, abs);
+	/*printf("btn %d abs %d\n", btn, abs);*/
 	if (!btn || !abs) {
 		return 0;
 	}
@@ -1551,7 +1550,6 @@ int evdev_instantiate(struct server_context *ctx,
 	dev->private = pvt;
 	dev->srv_ctx = ctx;
 
-	printf("adding evdev device(%s)\n", devpath);
 	if (fdpoll_handler_add(fdpoll, devfd, FDPOLLIN, transceive_evdev, dev)) {
 		printf("fdpoll_handler_add(%d) failed, evdev input\n", devfd);
 		goto err_free;
@@ -1655,7 +1653,7 @@ void load_linux_input_drivers(struct server_context *ctx,
 			}
 			else {
 				(*device_list)->func_hotkey = hk;
-				printf("using keyboard: %s\n", prp->path);
+				printf("[keyboard] = %s\n", prp->path);
 			}
 		}
 
@@ -1668,7 +1666,7 @@ void load_linux_input_drivers(struct server_context *ctx,
 				printf("evdev instantiate mouse failed %s\n", prp->path);
 			}
 			else {
-				printf("using mouse: %s\n", prp->path);
+				printf("[mouse] = %s\n", prp->path);
 			}
 		}
 
@@ -1685,10 +1683,10 @@ void load_linux_input_drivers(struct server_context *ctx,
 					struct drv_evdev_pvt *drv;
 					drv = (*device_list)->private;
 					drv->is_trackpad = 1;
-					printf("using trackpad device: %s\n", prp->path);
+					printf("[trackpad] = %s\n", prp->path);
 				}
 				else {
-					printf("using touch device: %s\n", prp->path);
+					printf("[surface] = %s\n", prp->path);
 				}
 			}
 		}
