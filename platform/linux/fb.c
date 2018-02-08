@@ -13,6 +13,7 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  *
  *
+ * TODO support resolutions not divisible by PIXL_ALIGN
  */
 
 #define _GNU_SOURCE
@@ -144,6 +145,7 @@ int sync_dmg_to_fb(struct server_context *ctx, struct client *cl)
 
 int fb_drm_fd_callback(int fd, int event_flags, void *user_data)
 {
+	/* kernel drm_file.c advises 4K buffer since read only returns 1 event */
 	char buf[4096];
 	struct drm_event *event;
 	int r;
@@ -255,7 +257,6 @@ int fb_sync_client(struct server_context *ctx, struct client *cl)
 			return sync_dmg_to_fb(ctx, cl);
 		}
 	}
-
 
 	return 0;
 }
