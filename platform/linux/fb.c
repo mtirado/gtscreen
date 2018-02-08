@@ -59,15 +59,16 @@ static void bench_end(struct timespec start)
 	printf("benched usecs: %lu\n", usecs_elapsed(start, end));
 }
 
-/* now just assumes top left orientation :( */
-static int copy_to_fb(struct spr16_framebuffer *fb,
+static int copy_to_fb(struct server_context *ctx,
 		      struct client *cl,
 		      struct spr16_msgdata_sync dmg)
 {
 
+	struct spr16_framebuffer *fb = ctx->fb;
 	/* TODO < 8bpp support */
 	const uint32_t grid_size = PIXL_ALIGN * (fb->bpp/8);
 	const uint32_t weight = fb->bpp/8;
+	const uint32_t pitch = ctx->card0->sfb->pitch;
 	uint32_t count;
 	uint16_t x = dmg.xmin;
 	uint16_t y = dmg.ymin;
@@ -75,6 +76,7 @@ static int copy_to_fb(struct spr16_framebuffer *fb,
 	uint16_t height = dmg.ymax - dmg.ymin;
 	uint16_t i;
 	struct timespec bench_timer;
+
 	/* convert to bytes */
 	width *= weight;
 	x *= weight;
@@ -89,10 +91,11 @@ static int copy_to_fb(struct spr16_framebuffer *fb,
 	(void) bench_begin;
 	(void) bench_end;
 	(void) bench_timer;
+
 	/*bench_timer = bench_begin();*/
 	for (i = 0; i < height; ++i)
 	{
-		const uint32_t svoff = (((y + i) * fb->width) * weight) + x;
+		const uint32_t svoff = ((y + i) * pitch) + x;
 		const uint32_t cloff = (((y + i) * cl->sprite.width) * weight) + x;
 		uint16_t z;
 #if PIXL_ALIGN == 32
@@ -105,6 +108,7 @@ static int copy_to_fb(struct spr16_framebuffer *fb,
 			memcpy((fb->addr + svoff) + (z * grid_size),
 				(cl->sprite.shmem.addr + cloff)	+ (z * grid_size),
 				grid_size);
+
 		}
 #endif
 		/*printf("sync(%d, %d, %d, %d) y=%d\n", x, y, width, height, i);*/
@@ -117,7 +121,7 @@ static int copy_to_fb(struct spr16_framebuffer *fb,
 	return 0;
 }
 
-int sync_dmg_to_fb(struct spr16_framebuffer *fb, struct client *cl)
+int sync_dmg_to_fb(struct server_context *ctx, struct client *cl)
 {
 	int i;
 
@@ -129,7 +133,7 @@ int sync_dmg_to_fb(struct spr16_framebuffer *fb, struct client *cl)
 	/* maybe prefetch cl sprite here or something fancy like that? */
 	for (i = 0; i < cl->dmg_count; ++i)
 	{
-		if (copy_to_fb(fb, cl, cl->dmg[i])) {
+		if (copy_to_fb(ctx, cl, cl->dmg[i])) {
 			return -1;
 		}
 	}
@@ -180,10 +184,13 @@ int fb_drm_fd_callback(int fd, int event_flags, void *user_data)
 		switch (event->type)
 		{
 		case DRM_EVENT_VBLANK:
+			if (ctx == NULL) {
+				return FDPOLL_HANDLER_REMOVE;
+			}
 			if (!has_syncd && ctx->main_screen) {
 				struct client *cl;
 				cl = ctx->main_screen->clients;
-				if (cl && sync_dmg_to_fb(ctx->fb, cl) == 0) {
+				if (cl && sync_dmg_to_fb(ctx, cl) == 0) {
 					spr16_send_ack(cl->socket, SPRITEACK_SYNC_VSYNC);
 					has_syncd = 1;
 				}
@@ -231,12 +238,12 @@ static int drm_vblank(struct drm_kms *self)
 	return 0;
 }
 
-int fb_sync_client(struct server_context *self, struct client *cl)
+int fb_sync_client(struct server_context *ctx, struct client *cl)
 {
 
 	if (cl->sync_flags & SPRITESYNC_FLAG_VBLANK) {
 		if (spr16_server_is_active()) {
-			return drm_vblank(self->card0);
+			return drm_vblank(ctx->card0);
 		}
 	}
 	else if (cl->sync_flags & SPRITESYNC_FLAG_PAGE_FLIP) {
@@ -245,7 +252,7 @@ int fb_sync_client(struct server_context *self, struct client *cl)
 	}
 	else if (cl->sync_flags & SPRITESYNC_FLAG_ASYNC) {
 		if (!spr16_server_is_active()) {
-			return sync_dmg_to_fb(self->fb, cl);
+			return sync_dmg_to_fb(ctx, cl);
 		}
 	}
 

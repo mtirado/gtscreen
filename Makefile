@@ -23,7 +23,7 @@ endif
 # if you use a 64 bit system set bitcount(TODO untested).
 # errgh, and fix the memfd syscall it only works on x86
 # because syscall numbers are not the same...
-DEFINES := -DMAX_SYSTEMPATH=1024 -DPTRBITCOUNT=32
+DEFINES := -DMAX_SYSTEMPATH=1024 -DPTRBITCOUNT=32 -DPIXL_ALIGN=32
 CFLAGS  := -pedantic -Wall -Wextra -Werror $(DEFINES)
 DEFLANG := -ansi
 

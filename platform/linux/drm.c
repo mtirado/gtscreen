@@ -516,6 +516,7 @@ static struct drm_buffer *alloc_sfb(int card_fd,
 	}
 	ret->addr     = fbmap;
 	ret->size     = cdumb.size;
+	ret->pitch    = cdumb.pitch;
 	ret->width    = cdumb.width;
 	ret->height   = cdumb.height;
 	ret->bpp      = cdumb.bpp;

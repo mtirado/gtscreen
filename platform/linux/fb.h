@@ -33,10 +33,12 @@
  * should probably be used for anything that supports it? i don't have
  * any such space-age hardware to test these theories.
  */
-#define PIXL_ALIGN 32 /* right now this is kind of hacked up, 32 will use
-			 xmm sse2 instructions, for generic memcpy set this to 16 */
 
+#ifndef PIXL_ALIGN
+#define PIXL_ALIGN 16 /* right now this is kind of hacked up, 32 will use
+			 xmm sse2 instructions, for generic memcpy set this to 16 */
+#endif
 int fb_drm_fd_callback(int fd, int event_flags, void *user_data);
-int fb_sync_client(struct server_context *self, struct client *cl);
+int fb_sync_client(struct server_context *ctx, struct client *cl);
 
 #endif
