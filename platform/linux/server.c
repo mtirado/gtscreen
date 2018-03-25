@@ -683,16 +683,12 @@ static int spr16_server_sync(struct server_context *self,
 		       uint16_t flags,
 		       struct spr16_msgdata_sync *region)
 {
-	uint32_t xmin;
-	uint16_t xmax;
 	struct spr16_msgdata_sync dmg;
 
-	/*
-	 * TODO some way to handle multiple displays, for now consider
-	 * out of bounds syncs to be errors
-	 */
-	if (region->xmax > self->fb->width
-			|| region->ymax > self->fb->height
+	if (region->xmax >= self->fb->width
+			|| region->ymax >= self->fb->height
+			|| region->xmin >= self->fb->width
+			|| region->ymin >= self->fb->height
 			|| region->xmax < region->xmin
 			|| region->ymax < region->ymin) {
 		printf("bad sync parameters(%d, %d, %d, %d)\n",
@@ -707,17 +703,8 @@ static int spr16_server_sync(struct server_context *self,
 		return -1;
 	}
 
-	xmin = (region->xmin - (region->xmin % PIXL_ALIGN));
-	xmax = region->xmax;
-	if (xmax % PIXL_ALIGN) /* is there a way to do this without branching so much? */
-		xmax  = (region->xmax + (PIXL_ALIGN - (region->xmax % PIXL_ALIGN)));
-	if (xmax > self->fb->width) {
-		printf("bad sync, xmax == %d\n", xmax);
-		return -1;
-	}
-
-	dmg.xmin   = xmin;
-	dmg.xmax   = xmax;
+	dmg.xmin   = region->xmin;
+	dmg.xmax   = region->xmax;
 	dmg.ymin   = region->ymin;
 	dmg.ymax   = region->ymax;
 	accumulate_dmg(cl, dmg);

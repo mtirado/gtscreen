@@ -73,10 +73,23 @@ static int copy_to_fb(struct server_context *ctx,
 	uint32_t count;
 	uint16_t x = dmg.xmin;
 	uint16_t y = dmg.ymin;
-	uint16_t width = dmg.xmax - dmg.xmin;
-	uint16_t height = dmg.ymax - dmg.ymin;
+	uint16_t x_extent;
+	uint16_t height;
+	uint16_t width;
 	uint16_t i;
 	struct timespec bench_timer;
+
+
+	height = (dmg.ymax - dmg.ymin) + 1;
+	/* quantize regions on grid for optimized copy */
+	x = (dmg.xmin - (dmg.xmin % PIXL_ALIGN));
+	x_extent = dmg.xmax + 1;
+	if (x_extent % PIXL_ALIGN) /* can we clean up this branching? */
+		x_extent  = (dmg.xmax + (PIXL_ALIGN - (dmg.xmax % PIXL_ALIGN)));
+	if (x_extent > ctx->fb->width)
+		x_extent = ctx->fb->width;
+
+	width = x_extent - x;
 
 	/* convert to bytes */
 	width *= weight;
@@ -92,15 +105,14 @@ static int copy_to_fb(struct server_context *ctx,
 	(void) bench_begin;
 	(void) bench_end;
 	(void) bench_timer;
-
 	/*bench_timer = bench_begin();*/
 	for (i = 0; i < height; ++i)
 	{
 		const uint32_t svoff = ((y + i) * pitch) + x;
 		const uint32_t cloff = (((y + i) * cl->sprite.width) * weight) + x;
 		uint16_t z;
-#if PIXL_ALIGN == 32
 		(void)z;
+#if PIXL_ALIGN == 32
 		x86_sse2_xmmcpy_1024(fb->addr + svoff,
 				    cl->sprite.shmem.addr + cloff,
 				    count);
